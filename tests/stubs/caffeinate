@@ -1,0 +1,9 @@
+#!/bin/sh
+# Stands in for caffeinate(8): drops the options and runs the command.
+while [ $# -gt 0 ]; do
+    case $1 in
+    -*) shift ;;
+    *) break ;;
+    esac
+done
+exec "$@"

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Runs proton-firesafe once a day in the login session, where it can reach
+  the keychain. Generated from launchd.plist.in by "make agent".
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>@LABEL@</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>@BINDIR@/proton-firesafe</string>
+		<string>run</string>
+	</array>
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Hour</key>
+		<integer>@HOUR@</integer>
+		<key>Minute</key>
+		<integer>@MINUTE@</integer>
+	</dict>
+	<key>ProcessType</key>
+	<string>Standard</string>
+	<key>StandardOutPath</key>
+	<string>@HOME@/Library/Logs/proton-firesafe.launchd.log</string>
+	<key>StandardErrorPath</key>
+	<string>@HOME@/Library/Logs/proton-firesafe.launchd.log</string>
+</dict>
+</plist>

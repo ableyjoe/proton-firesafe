@@ -1,0 +1,575 @@
+#!/bin/sh
+#
+# proton-firesafe: keep a recent Proton Drive takeout on whichever of two
+# rotating, encrypted backup disks is attached, and send email when it is
+# time to swap the attached disk for the one in the fire safe.
+#
+# See proton-firesafe(1).
+#
+# Copyright (c) 2026 Joe Abley <jabley@strandkip.nl>
+# SPDX-License-Identifier: ISC
+
+set -u
+
+VERSION=0.1.0
+
+# ---- defaults; set any of these in the config file ---------------------------
+
+DISKS="Firesafe-A Firesafe-B"      # volume names of the rotating disks
+SECTIONS="my-files devices photos" # takeout sections; revisions is the other
+TAKEOUT_EVERY_DAYS=7               # make a fresh takeout this often
+SWAP_AFTER_DAYS=28                 # ask for a swap once a disk has been attached this long
+REMIND_EVERY_DAYS=7                # repeat reminders this often
+STATUS_EVERY_DAYS=0                # send an "all is well" report this often; 0 for never
+KEEP_TAKEOUTS=2                    # complete takeouts to keep on each disk
+TAKEOUT_WARN_HOURS=24              # mail if a takeout is still running after this long; 0 for never
+ALLOW_UNENCRYPTED=no               # write takeouts to unencrypted volumes too
+MAILTO=""                          # where to send mail; nothing is sent without it
+MAILFROM=""                        # default: "proton-firesafe on HOST <MAILTO>"
+SENDMAIL="/opt/local/bin/msmtp -t"
+PROTON_DRIVE=/opt/local/bin/proton-drive
+
+# ---- environment; the overrides exist for the test suite -------------------------
+
+PATH=${PROTON_FIRESAFE_PATH:-/opt/local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin}
+CONFIG=${PROTON_FIRESAFE_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/proton-firesafe/config}
+STATE=${PROTON_FIRESAFE_STATE:-"$HOME/Library/Application Support/proton-firesafe"}
+LOG=${PROTON_FIRESAFE_LOG:-"$HOME/Library/Logs/proton-firesafe.log"}
+VOLUMES=${PROTON_FIRESAFE_VOLUMES:-/Volumes}
+NOW=${PROTON_FIRESAFE_NOW:-$(date +%s)}
+export PATH
+
+DAY=86400
+SLACK=14400 # launchd runs drift, and daylight saving moves them by an hour
+MARKER=.proton-firesafe
+HOST=$(hostname -s 2>/dev/null || hostname)
+MAILNO=0
+
+die() { echo "proton-firesafe: $*" >&2; exit 1; }
+
+if [ -f "$CONFIG" ]; then
+    # shellcheck disable=SC1090
+    . "$CONFIG" || die "cannot read $CONFIG"
+fi
+[ -n "$MAILFROM" ] || MAILFROM="proton-firesafe on $HOST <$MAILTO>"
+
+whole_number() {
+    case $2 in
+    '' | *[!0-9]*) die "$1 must be a whole number, not \"$2\"" ;;
+    esac
+}
+whole_number TAKEOUT_EVERY_DAYS "$TAKEOUT_EVERY_DAYS"
+whole_number SWAP_AFTER_DAYS "$SWAP_AFTER_DAYS"
+whole_number REMIND_EVERY_DAYS "$REMIND_EVERY_DAYS"
+whole_number STATUS_EVERY_DAYS "$STATUS_EVERY_DAYS"
+whole_number KEEP_TAKEOUTS "$KEEP_TAKEOUTS"
+whole_number TAKEOUT_WARN_HOURS "$TAKEOUT_WARN_HOURS"
+WARN_SECONDS=${PROTON_FIRESAFE_WARN_SECONDS:-$((TAKEOUT_WARN_HOURS * 3600))}
+[ "$KEEP_TAKEOUTS" -ge 1 ] || die "KEEP_TAKEOUTS must be at least 1"
+
+# ---- helpers ----------------------------------------------------------------
+
+log() {
+    mkdir -p "$(dirname "$LOG")"
+    printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >>"$LOG"
+}
+
+# Epoch seconds to "5 October 2026", with BSD date or GNU date.
+fmt_date() {
+    { LC_ALL=C date -r "$1" '+%e %B %Y' 2>/dev/null ||
+        LC_ALL=C date -d "@$1" '+%e %B %Y'; } | sed 's/^ *//'
+}
+
+# Epoch seconds to a sortable folder-name stamp.
+fmt_stamp() {
+    date -r "$1" '+%Y%m%d-%H%M%S' 2>/dev/null || date -d "@$1" '+%Y%m%d-%H%M%S'
+}
+
+# Whole days from $1 to $2, give or take a few hours.
+days_between() { echo $((($2 - $1 + SLACK) / DAY)); }
+
+get() { cat "$STATE/$1" 2>/dev/null || printf '%s\n' "${2:-}"; }
+put() { mkdir -p "$STATE" && printf '%s\n' "$2" >"$STATE/$1"; }
+
+send_mail() {
+    if [ -z "$MAILTO" ]; then
+        log "MAILTO is not set, so not sending: $1"
+        return 1
+    fi
+    MAILNO=$((MAILNO + 1))
+    # shellcheck disable=SC2086 # SENDMAIL is a command with arguments
+    if printf '%s\n' \
+        "From: $MAILFROM" \
+        "To: $MAILTO" \
+        "Subject: [proton-firesafe] $1" \
+        "Date: $(LC_ALL=C date '+%a, %d %b %Y %H:%M:%S %z')" \
+        "Message-ID: <proton-firesafe.$NOW.$$.$MAILNO@$HOST>" \
+        "MIME-Version: 1.0" \
+        "Content-Type: text/plain; charset=utf-8" \
+        "Content-Transfer-Encoding: 8bit" \
+        "" \
+        "$2" | $SENDMAIL; then
+        log "mailed: $1"
+    else
+        log "FAILED to send mail: $1"
+        return 1
+    fi
+}
+
+# remind KEY DAYS SUBJECT BODY: mail about KEY at most once every DAYS days.
+remind() {
+    _last=$(get "remind-$1" 0)
+    [ $((NOW - _last)) -ge $(($2 * DAY)) ] || return 0
+    send_mail "$3" "$4" && put "remind-$1" "$NOW"
+}
+forget() { rm -f "$STATE/remind-$1"; }
+
+is_disk_name() {
+    case " $DISKS " in
+    *" $1 "*) return 0 ;;
+    esac
+    return 1
+}
+
+# Complete takeouts on a volume, oldest first.
+takeouts() {
+    for _t in "$1"/takeout-*; do
+        [ -d "$_t" ] || continue
+        case $_t in
+        *.partial) continue ;;
+        esac
+        printf '%s\n' "$_t"
+    done
+}
+count_takeouts() { takeouts "$1" | wc -l | tr -d ' '; }
+list_takeouts() {
+    takeouts "$1" | sed 's|.*/|  |'
+    [ "$(count_takeouts "$1")" -gt 0 ] || echo "  none"
+}
+
+remove_takeout() {
+    log "deleting $1 $2"
+    rm -rf "$1" "$1.log"
+}
+
+free_kb() { df -Pk "$1" | awk 'NR == 2 { print $4 }'; }
+kb_to_gb() { awk -v kb="$1" 'BEGIN { printf "%.0f GB\n", kb * 1024 / 1e9 }'; }
+
+# When the takeout on a disk was made, or 0 for never.
+last_takeout() { cat "$VOLUMES/$1/.last-takeout" 2>/dev/null || echo 0; }
+
+# Items a takeout could not export, according to its manifest.
+failed_items() {
+    sed -n 's/.*"failedItems": *\([0-9]*\).*/\1/p' "$1" 2>/dev/null |
+        awk '{ n += $1 } END { print n + 0 }'
+}
+
+is_encrypted() {
+    [ "$ALLOW_UNENCRYPTED" = yes ] && return 0
+    diskutil info "$1" 2>/dev/null | grep -Eq '^ *(FileVault|Encrypted): +Yes'
+}
+
+# The attached disk: a mounted volume named in DISKS that carries the
+# marker. If both are attached, the one with the older takeout.
+attached_disk() {
+    _found=""
+    for _d in $DISKS; do
+        [ -f "$VOLUMES/$_d/$MARKER" ] || continue
+        if [ -z "$_found" ] || [ "$(last_takeout "$_d")" -lt "$(last_takeout "$_found")" ]; then
+            _found=$_d
+        fi
+    done
+    printf '%s\n' "$_found"
+}
+
+other_disks() {
+    _others=""
+    for _d in $DISKS; do
+        [ "$_d" = "$1" ] || _others="${_others:+$_others or }$_d"
+    done
+    printf '%s\n' "$_others"
+}
+
+# Why a disk that seems to be there cannot be used.
+disk_hints() {
+    # Since macOS 11, diskutil list wraps names in U+2068 and U+2069.
+    _list=$(diskutil list 2>/dev/null | tr -d '\342\201\250\251')
+    for _d in $DISKS; do
+        if [ -d "$VOLUMES/$_d" ] && [ ! -f "$VOLUMES/$_d/$MARKER" ]; then
+            printf '%s is mounted, but has not been set up. To set it up, run\n  proton-firesafe init %s\n\n' \
+                "$_d" "$VOLUMES/$_d"
+        elif [ ! -d "$VOLUMES/$_d" ] && printf '%s\n' "$_list" | grep -Eq "APFS Volume $_d( |\$)"; then
+            printf '%s is attached but not mounted, which usually means it is locked\n%s\n\n' \
+                "$_d" "because its password is not in the login keychain."
+        fi
+    done
+}
+
+summary() {
+    for _d in $DISKS; do
+        _t=$(get "last-takeout-$_d" 0)
+        if [ "$_t" -gt 0 ]; then
+            echo "  $_d: newest takeout from $(fmt_date "$_t")"
+        else
+            echo "  $_d: no takeout yet"
+        fi
+    done
+}
+
+lock() {
+    lockdir="$STATE/lock"
+    mkdir -p "$STATE"
+    if ! mkdir "$lockdir" 2>/dev/null; then
+        _pid=$(cat "$lockdir/pid" 2>/dev/null || true)
+        if [ -n "$_pid" ] && kill -0 "$_pid" 2>/dev/null; then
+            log "another run (pid $_pid) is still going"
+            echo "proton-firesafe: another run (pid $_pid) is still going" >&2
+            exit 0
+        fi
+        log "removing stale lock from pid ${_pid:-unknown}"
+        rm -rf "$lockdir"
+        mkdir "$lockdir" || die "cannot create $lockdir"
+    fi
+    echo $$ >"$lockdir/pid"
+    trap 'rm -rf "$lockdir"' EXIT
+    trap 'exit 1' HUP INT TERM
+}
+
+# A disk has been plugged in.
+note_attached() {
+    log "$1 attached"
+    put current "$1"
+    put attached-since "$NOW"
+    put announce "$1"
+    forget no-disk
+}
+
+eject() {
+    if diskutil eject "$VOLUMES/$1" >>"$LOG" 2>&1; then
+        log "$1 ejected"
+        put current ""
+        put swapped-out "$1"
+        put swapped-at "$NOW"
+        put remind-no-disk "$NOW" # the swap request counts as a reminder
+        return 0
+    fi
+    log "could not eject $1"
+    return 1
+}
+
+# ---- takeout ------------------------------------------------------------------
+
+# Make a takeout on disk $1. This succeeds when a takeout was written, even
+# if some items in it could not be exported.
+takeout_to() {
+    disk=$1
+    vol="$VOLUMES/$disk"
+
+    if ! is_encrypted "$vol"; then
+        log "$disk is not an encrypted volume, so no takeout was written to it"
+        remind not-encrypted "$REMIND_EVERY_DAYS" "$disk is not encrypted" \
+"$vol is not an encrypted volume, so proton-firesafe will not write
+your Proton Drive to it. Erase it as APFS (Encrypted) and set it up
+again; see proton-firesafe(1)."
+        return 1
+    fi
+    forget not-encrypted
+
+    rm -rf "$vol"/takeout-*.partial
+
+    # Make room for a takeout the size of the newest one, plus 10%, without
+    # ever deleting the newest one.
+    newest=$(takeouts "$vol" | tail -n 1)
+    if [ -n "$newest" ]; then
+        need=$(($(du -sk "$newest" | awk '{ print $1 }') * 11 / 10))
+        while [ "$(free_kb "$vol")" -lt "$need" ] && [ "$(count_takeouts "$vol")" -gt 1 ]; do
+            remove_takeout "$(takeouts "$vol" | head -n 1)" "to make room"
+        done
+        if [ "$(free_kb "$vol")" -lt "$need" ]; then
+            log "not enough room on $disk for a new takeout"
+            remind no-space "$REMIND_EVERY_DAYS" "$disk is too full for a new takeout" \
+"$disk has $(kb_to_gb "$(free_kb "$vol")") free, but a new takeout needs about
+$(kb_to_gb "$need"). Its newest takeout, $(basename "$newest"), has been kept.
+
+A bigger disk, or fewer SECTIONS in the config file, would fix this."
+            return 1
+        fi
+    fi
+    forget no-space
+
+    stamp=$(fmt_stamp "$NOW")
+    partial="$vol/takeout-$stamp.partial"
+    final="$vol/takeout-$stamp"
+    # The takeout's own output names files, so it stays on the encrypted disk.
+    tlog="$final.log"
+    set --
+    for _s in $SECTIONS; do set -- "$@" -i "$_s"; done
+
+    log "takeout to $disk started: $(basename "$final") ($SECTIONS)"
+
+    # A takeout that hangs, waiting for a dialog nobody can see, say, would
+    # otherwise go unnoticed: launchd starts no new run while one is going.
+    watchdog=""
+    running="$lockdir/running"
+    if [ "$WARN_SECONDS" -gt 0 ]; then
+        : >"$running"
+        (
+            sleep "$WARN_SECONDS"
+            [ -f "$running" ] || exit 0
+            MAILNO=$((MAILNO + 1000))
+            log "takeout to $disk is still running"
+            send_mail "takeout to $disk is taking a long time" \
+"The Proton Drive takeout to $disk started on $(fmt_date "$NOW"), and is
+still running. It may just be big, or it may be stuck, waiting for the
+network or for a dialog on the screen of $HOST.
+
+Its output is in $tlog."
+        ) 2>/dev/null &
+        watchdog=$!
+    fi
+
+    caffeinate -i "$PROTON_DRIVE" takeout run "$@" "$partial" >"$tlog" 2>&1
+    status=$?
+
+    if [ -n "$watchdog" ]; then
+        rm -f "$running"
+        pkill -P "$watchdog" sleep 2>/dev/null
+        kill "$watchdog" 2>/dev/null
+        wait "$watchdog" 2>/dev/null
+    fi
+
+    # The manifest is written once every section has finished, so without
+    # it there is no takeout.
+    if [ ! -f "$partial/manifest.json" ] || ! mv "$partial" "$final"; then
+        log "takeout to $disk FAILED (exit status $status)"
+        remind takeout-failed 1 "takeout to $disk failed" \
+"The Proton Drive takeout to $disk failed with exit status $status, and
+will be tried again on the next run. Its output, which names files and so
+is not included here, is in $tlog.
+
+The end of $LOG:
+
+$(tail -n 15 "$LOG")"
+        return 1
+    fi
+
+    echo "$NOW" >"$vol/.last-takeout"
+    put "last-takeout-$disk" "$NOW"
+    forget takeout-failed
+
+    if [ "$status" -eq 0 ]; then
+        log "takeout to $disk finished: $(basename "$final")"
+    else
+        failed=$(failed_items "$final/manifest.json")
+        log "takeout to $disk finished with $failed failed item(s): $(basename "$final")"
+        send_mail "takeout to $disk finished with $failed failed item(s)" \
+"The Proton Drive takeout to $disk has finished, but $failed item(s) could
+not be exported (exit status $status). Everything else was, and the
+takeout has been kept.
+
+Folders whose manifest.json says \"failures\": true hold the details, and
+the takeout's output is in $tlog."
+    fi
+
+    while [ "$(count_takeouts "$vol")" -gt "$KEEP_TAKEOUTS" ]; do
+        remove_takeout "$(takeouts "$vol" | head -n 1)" "(keeping $KEEP_TAKEOUTS)"
+    done
+    for _l in "$vol"/takeout-*.log; do
+        [ -f "$_l" ] && [ ! -d "${_l%.log}" ] && rm -f "$_l"
+    done
+    return 0
+}
+
+# ---- commands -------------------------------------------------------------------
+
+cmd_run() {
+    lock
+    disk=$(attached_disk)
+
+    if [ -z "$disk" ]; then
+        log "no backup disk attached"
+        remind no-disk "$REMIND_EVERY_DAYS" "no backup disk attached" \
+"No backup disk is attached to $HOST. Please plug in the one from the
+fire safe.
+
+$(disk_hints)Newest takeouts:
+$(summary)"
+        return 0
+    fi
+
+    vol="$VOLUMES/$disk"
+    [ "$(get current)" = "$disk" ] || note_attached "$disk"
+    since=$(get attached-since "$NOW")
+
+    if [ "$disk" = "$(get swapped-out)" ]; then
+        put announce ""
+        remind wrong-disk "$REMIND_EVERY_DAYS" "$disk should be in the fire safe" \
+"$disk was swapped out on $(fmt_date "$(get swapped-at 0)"), but it is
+attached to $HOST again. Please put it back in the fire safe, and plug in
+$(other_disks "$disk") instead.
+
+Takeouts will carry on to $disk in the meantime.
+
+Newest takeouts:
+$(summary)"
+    else
+        put swapped-out ""
+        forget wrong-disk
+    fi
+
+    swap_due=no
+    [ "$(days_between "$since" "$NOW")" -ge "$SWAP_AFTER_DAYS" ] && swap_due=yes
+
+    # Take out on schedule, and once more when the swap falls due, so that
+    # the disk goes into the fire safe as fresh as it can be.
+    last=$(last_takeout "$disk")
+    if [ "$(days_between "$last" "$NOW")" -ge "$TAKEOUT_EVERY_DAYS" ] ||
+        { [ "$swap_due" = yes ] && [ "$(days_between "$since" "$last")" -lt "$SWAP_AFTER_DAYS" ]; }; then
+        if takeout_to "$disk" && [ "$(get announce)" = "$disk" ]; then
+            put announce ""
+            put remind-status "$NOW" # the announcement counts as a status report
+            send_mail "$disk is in place" \
+"$disk is attached to $HOST, and now holds a fresh takeout.
+The next swap is due on $(fmt_date $((since + SWAP_AFTER_DAYS * DAY))).
+
+Newest takeouts:
+$(summary)"
+        fi
+        last=$(last_takeout "$disk")
+    fi
+
+    if [ "$swap_due" = yes ] && [ "$(days_between "$since" "$last")" -ge "$SWAP_AFTER_DAYS" ]; then
+        if eject "$disk"; then
+            send_mail "time to swap the backup disks" \
+"$disk holds a takeout from $(fmt_date "$last") and has been ejected,
+so it is safe to unplug.
+
+Please put $disk in the fire safe, and plug in $(other_disks "$disk")
+in its place.
+
+Newest takeouts:
+$(summary)"
+            put remind-status "$NOW"
+            return 0
+        fi
+        remind eject-failed "$REMIND_EVERY_DAYS" "could not eject $disk" \
+"$disk is due to be swapped, but could not be ejected; something may be
+using it. Eject it by hand with
+
+  diskutil eject $vol
+
+then put it in the fire safe, and plug in $(other_disks "$disk")."
+    fi
+
+    if [ "$STATUS_EVERY_DAYS" -gt 0 ]; then
+        remind status "$STATUS_EVERY_DAYS" "status: $disk attached" \
+"$disk has been attached to $HOST since $(fmt_date "$since"), and has
+$(kb_to_gb "$(free_kb "$vol")") free. Its takeouts:
+$(list_takeouts "$vol")
+
+Newest takeouts:
+$(summary)"
+    fi
+    return 0
+}
+
+cmd_takeout() {
+    lock
+    disk=$(attached_disk)
+    [ -n "$disk" ] || die "no backup disk is attached"
+    [ "$(get current)" = "$disk" ] || note_attached "$disk"
+    echo "Taking out Proton Drive to $disk, which can take hours."
+    takeout_to "$disk" || die "no takeout was made; see $LOG"
+    echo "Done: $VOLUMES/$disk/takeout-$(fmt_stamp "$NOW")"
+}
+
+cmd_eject() {
+    lock
+    disk=$(attached_disk)
+    [ -n "$disk" ] || die "no backup disk is attached"
+    eject "$disk" || die "could not eject $disk; see $LOG"
+    echo "$disk has been ejected. Put it in the fire safe, and plug in $(other_disks "$disk")."
+}
+
+cmd_status() {
+    disk=$(attached_disk)
+    if [ -n "$disk" ]; then
+        vol="$VOLUMES/$disk"
+        since=$(get attached-since "$NOW")
+        [ "$(get current)" = "$disk" ] || since=$NOW
+        last=$(last_takeout "$disk")
+        echo "Attached:     $disk, since $(fmt_date "$since")"
+        if is_encrypted "$vol"; then
+            echo "Encrypted:    yes"
+        else
+            echo "Encrypted:    NO"
+        fi
+        echo "Free:         $(kb_to_gb "$(free_kb "$vol")")"
+        if [ "$last" -gt 0 ]; then
+            echo "Next takeout: $(fmt_date $((last + TAKEOUT_EVERY_DAYS * DAY)))"
+        else
+            echo "Next takeout: on the next run"
+        fi
+        echo "Swap due:     $(fmt_date $((since + SWAP_AFTER_DAYS * DAY)))"
+        echo "Takeouts on $disk:"
+        list_takeouts "$vol"
+    else
+        echo "Attached:     none"
+        disk_hints
+    fi
+    echo "Newest takeouts:"
+    summary
+    echo "Mail to:      ${MAILTO:-nobody; set MAILTO in the config file}"
+    if [ -f "$CONFIG" ]; then
+        echo "Config:       $CONFIG"
+    else
+        echo "Config:       $CONFIG (not found, so using defaults)"
+    fi
+    echo "Log:          $LOG"
+}
+
+cmd_init() {
+    [ $# -eq 1 ] || die "usage: proton-firesafe init /Volumes/NAME"
+    vol=${1%/}
+    name=$(basename "$vol")
+    is_disk_name "$name" || die "$name is not one of the DISKS: $DISKS"
+    [ -d "$vol" ] || die "$vol is not mounted"
+    is_encrypted "$vol" || die "$vol is not an encrypted volume; see proton-firesafe(1)"
+    touch "$vol/$MARKER" || die "cannot write to $vol"
+    log "$name set up"
+    echo "$vol is ready for takeouts."
+}
+
+cmd_test_mail() {
+    [ -n "$MAILTO" ] || die "MAILTO is not set in $CONFIG"
+    send_mail "test message" \
+"This is a test message from proton-firesafe on $HOST.
+If you can read it, mail works." || die "sending failed; see $LOG"
+    echo "Sent a test message to $MAILTO."
+}
+
+usage() {
+    cat <<EOF
+usage: proton-firesafe [run]
+       proton-firesafe takeout | eject | status | test-mail | version
+       proton-firesafe init /Volumes/NAME
+EOF
+}
+
+case "${1:-run}" in
+run) cmd_run ;;
+takeout) cmd_takeout ;;
+eject) cmd_eject ;;
+status) cmd_status ;;
+init)
+    shift
+    cmd_init "$@"
+    ;;
+test-mail) cmd_test_mail ;;
+version) echo "proton-firesafe $VERSION" ;;
+help | -h | --help) usage ;;
+*)
+    usage >&2
+    exit 2
+    ;;
+esac

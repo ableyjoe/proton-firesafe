@@ -1,0 +1,34 @@
+#!/bin/sh
+# Stands in for diskutil(8). A volume is encrypted unless it holds a file
+# called .stub-unencrypted; ejecting moves it to $STUB_SHELF.
+#   STUB_EJECT_FAIL      make eject fail
+#   STUB_DISKUTIL_LIST   file whose contents "diskutil list" prints
+echo "diskutil $*" >>"${STUB_CALLS:-/dev/null}"
+case ${1:-} in
+info)
+    [ -d "$2" ] || { echo "Could not find disk: $2" >&2; exit 1; }
+    echo "   Volume Name:               $(basename "$2")"
+    echo "   File System Personality:   APFS"
+    if [ -f "$2/.stub-unencrypted" ]; then
+        echo "   FileVault:                 No"
+    else
+        echo "   FileVault:                 Yes (Unlocked)"
+        echo "   Locked:                    No"
+    fi
+    ;;
+list)
+    cat "${STUB_DISKUTIL_LIST:-/dev/null}"
+    ;;
+eject)
+    if [ -n "${STUB_EJECT_FAIL:-}" ]; then
+        echo "Volume $2 failed to eject: dissented by PID 1234" >&2
+        exit 1
+    fi
+    mkdir -p "$STUB_SHELF"
+    mv "$2" "$STUB_SHELF/" && echo "Disk $2 ejected"
+    ;;
+*)
+    echo "stub: unexpected: diskutil $*" >&2
+    exit 64
+    ;;
+esac

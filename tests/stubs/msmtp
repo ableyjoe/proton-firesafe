@@ -1,0 +1,8 @@
+#!/bin/sh
+# Stands in for msmtp(1): appends each message to $STUB_MAILBOX.
+#   STUB_MAIL_FAIL  make sending fail
+[ -z "${STUB_MAIL_FAIL:-}" ] || exit 75
+{
+    cat
+    echo "----- end of message -----"
+} >>"$STUB_MAILBOX"

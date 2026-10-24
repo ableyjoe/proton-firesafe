@@ -1,0 +1,12 @@
+#!/bin/sh
+# Stands in for df(1) when STUB_DF_FREE_KB is set, and runs the real one
+# otherwise.
+if [ -n "${STUB_DF_FREE_KB:-}" ]; then
+    echo "Filesystem 1024-blocks Used Available Capacity Mounted on"
+    echo "/dev/stub 1953125000 1 $STUB_DF_FREE_KB 99% $2"
+    exit 0
+fi
+for df in /bin/df /usr/bin/df; do
+    [ -x "$df" ] && exec "$df" "$@"
+done
+exit 127

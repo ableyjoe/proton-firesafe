@@ -1,0 +1,56 @@
+#!/bin/sh
+# Stands in for proton-drive in the tests.
+#   STUB_TAKEOUT=ok       export everything (the default)
+#   STUB_TAKEOUT=partial  export all but 3 items, as takeout does on errors
+#   STUB_TAKEOUT=fail     fail before writing the manifest
+#   STUB_TAKEOUT_KB       size of the exported file, in KB (default 100)
+#   STUB_TAKEOUT_SECONDS  how long the takeout takes (default 0)
+echo "proton-drive $*" >>"${STUB_CALLS:-/dev/null}"
+[ "${1:-} ${2:-}" = "takeout run" ] || { echo "stub: unexpected: $*" >&2; exit 64; }
+shift 2
+while [ $# -gt 1 ]; do shift; done
+dir=$1
+mkdir -p "$dir/my-files/docs"
+dd if=/dev/zero of="$dir/my-files/docs/secret-plans.pdf" bs=1024 count="${STUB_TAKEOUT_KB:-100}" 2>/dev/null
+echo "Downloaded my-files/docs/secret-plans.pdf"
+sleep "${STUB_TAKEOUT_SECONDS:-0}"
+failed=0
+case ${STUB_TAKEOUT:-ok} in
+fail)
+    echo "Error: failed to download my-files/docs/secret-plans.pdf: session expired" >&2
+    exit 1
+    ;;
+partial) failed=3 ;;
+esac
+cat >"$dir/manifest.json" <<JSON
+{
+  "version": 1,
+  "sections": {
+    "my-files": {
+      "path": "./my-files",
+      "failures": $([ $failed -gt 0 ] && echo true || echo false),
+      "transferSummary": {
+        "downloadedItems": 1,
+        "downloadedBytes": 102400,
+        "skippedItems": 0,
+        "failedItems": $failed
+      }
+    },
+    "devices": {
+      "path": "./devices",
+      "failures": false,
+      "transferSummary": {
+        "downloadedItems": 0,
+        "downloadedBytes": 0,
+        "skippedItems": 0,
+        "failedItems": 0
+      }
+    }
+  }
+}
+JSON
+if [ $failed -gt 0 ]; then
+    echo "Error: $failed item(s) failed to export" >&2
+    exit 1
+fi
+exit 0

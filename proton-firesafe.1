@@ -1,0 +1,328 @@
+.\" Copyright (c) 2026 Joe Abley <jabley@strandkip.nl>
+.\" SPDX-License-Identifier: ISC
+.Dd October 24, 2026
+.Dt PROTON-FIRESAFE 1
+.Os
+.Sh NAME
+.Nm proton-firesafe
+.Nd keep Proton Drive takeouts on two rotating, encrypted disks
+.Sh SYNOPSIS
+.Nm
+.Op Cm run
+.Nm
+.Cm takeout
+.Nm
+.Cm eject
+.Nm
+.Cm status
+.Nm
+.Cm init
+.Ar volume
+.Nm
+.Cm test-mail
+.Nm
+.Cm version
+.Sh DESCRIPTION
+.Nm
+keeps an offline copy of a Proton Drive account on whichever of two
+external disks is attached to a Mac, and sends email when it is time to
+swap that disk for the one in the fire safe.
+.Pp
+It is meant to run once a day, from a
+.Xr launchd 8
+agent.
+Each run looks for an attached disk, makes a fresh takeout on it with
+.Ql proton-drive takeout run
+if the newest one is a week old, and keeps the two newest.
+Once a disk has been attached for four weeks,
+.Nm
+makes one more takeout, ejects the disk, and asks by email for it to be
+put in the fire safe and the other one plugged in.
+At any time, one disk holds a takeout from the last week, and the other,
+in the fire safe, one from the last month or so.
+.Pp
+The disks must be APFS (Encrypted) volumes, named as in
+.Ev DISKS ,
+and set up with
+.Cm init .
+.Nm
+refuses to write a takeout to an unencrypted volume.
+A disk's password needs to be saved in the login keychain so that it
+mounts by itself when plugged in; see
+.Sx EXAMPLES .
+.Pp
+A takeout is written to
+.Pa takeout- Ns Ar YYYYmmdd-HHMMSS Ns Pa .partial
+on the disk, and renamed without the
+.Pa .partial
+once
+.Xr proton-drive 1
+has written its
+.Pa manifest.json ,
+which it does once every section has finished.
+If some items cannot be exported,
+.Xr proton-drive 1
+still writes the manifest but exits with an error; such a takeout is kept
+and counted, and reported by email, so that one file that will not
+download does not hold up every takeout and swap.
+.Pp
+Before a takeout,
+.Nm
+deletes older takeouts if the disk might not have room for one the size
+of the newest, but never deletes the newest.
+.Sh COMMANDS
+.Bl -tag -width Ds
+.It Cm run
+Do whatever is due: ask for a disk if none is attached, make a takeout,
+eject the disk and ask for a swap, or send a reminder.
+This is the default, and what the
+.Xr launchd 8
+agent runs.
+It exits 0 unless something is wrong with the configuration; failures
+are reported by email instead.
+.It Cm takeout
+Make a takeout on the attached disk now, whether or not one is due.
+.It Cm eject
+Eject the attached disk, as for a swap, so that it can be swapped early.
+.It Cm status
+Show which disk is attached, whether it is encrypted, how much room it
+has, when the next takeout and swap are due, the takeouts on it, and the
+newest takeout on each disk.
+.It Cm init Ar volume
+Set up a mounted volume to receive takeouts, by creating the
+.Pa .proton-firesafe
+marker file on it.
+The volume must be encrypted, and named in
+.Ev DISKS .
+.It Cm test-mail
+Send a test message to
+.Ev MAILTO .
+.It Cm version
+Print the version.
+.El
+.Sh CONFIGURATION
+.Nm
+reads the
+.Xr sh 1
+file
+.Pa ~/.config/proton-firesafe/config ,
+if it exists, which can set any of the following.
+.Bl -tag -width Ds
+.It Ev MAILTO
+Where to send email.
+Without it, nothing is sent; what would have been is logged.
+.It Ev MAILFROM
+The
+.Ql "From:"
+of the email.
+The default is
+.Ql proton-firesafe on Ar host Aq Ev MAILTO .
+.It Ev SENDMAIL
+The command that sends a message, which it reads, headers and all, from
+its standard input.
+The default is
+.Ql /opt/local/bin/msmtp -t .
+.It Ev PROTON_DRIVE
+The
+.Xr proton-drive 1
+command.
+The default is
+.Pa /opt/local/bin/proton-drive .
+.It Ev DISKS
+The volume names of the disks, separated by spaces.
+The default is
+.Ql Firesafe-A Firesafe-B .
+More than two can be named.
+.It Ev SECTIONS
+The takeout sections to include, separated by spaces: any of
+.Cm my-files ,
+.Cm devices ,
+.Cm photos ,
+and
+.Cm revisions ,
+which also needs
+.Cm my-files
+or
+.Cm devices .
+The default is
+.Ql my-files devices photos .
+.It Ev TAKEOUT_EVERY_DAYS
+How often to make a takeout.
+The default is 7.
+.It Ev SWAP_AFTER_DAYS
+How long a disk stays attached before a swap.
+The default is 28.
+.It Ev KEEP_TAKEOUTS
+How many takeouts to keep on each disk.
+The default is 2.
+.It Ev REMIND_EVERY_DAYS
+How often to repeat a reminder about something that needs doing, such as
+plugging in a disk.
+The default is 7.
+.It Ev TAKEOUT_WARN_HOURS
+How long a takeout can run before
+.Nm
+sends email to say that it is still going, or 0 for never.
+The default is 24.
+.It Ev STATUS_EVERY_DAYS
+How often to send a report that all is well, or 0 for never.
+The default is 0, since the swap requests come often enough to show that
+.Nm
+is still running.
+.It Ev ALLOW_UNENCRYPTED
+Set to
+.Ql yes
+to allow takeouts to unencrypted volumes.
+Do not.
+.El
+.Sh EMAIL
+.Nm
+sends these messages, each with a subject starting
+.Ql [proton-firesafe] .
+.Bl -tag -width Ds
+.It no backup disk attached
+No set-up disk is mounted.
+Repeated every
+.Ev REMIND_EVERY_DAYS ,
+counting from the swap request.
+If a disk seems to be attached but locked, or mounted but not set up,
+the message says so.
+.It Ar disk No is in place
+The first takeout on a newly attached disk has finished.
+.It time to swap the backup disks
+The attached disk has had its last takeout and been ejected.
+.It Ar disk No should be in the fire safe
+The disk that was just swapped out has been plugged back in.
+Takeouts carry on to it, and the message is repeated every
+.Ev REMIND_EVERY_DAYS ,
+until another disk is attached.
+.It takeout to Ar disk No failed
+Repeated daily until a takeout works.
+.It takeout to Ar disk No is taking a long time
+A takeout has been running for
+.Ev TAKEOUT_WARN_HOURS .
+It may just be big, or it may be stuck; while it runs,
+.Xr launchd 8
+starts no other run, so nothing else would say so.
+.It takeout to Ar disk No finished with Ar n No failed item(s)
+.It Ar disk No is too full for a new takeout
+.It Ar disk No is not encrypted
+.It could not eject Ar disk
+.It status: Ar disk No attached
+Only if
+.Ev STATUS_EVERY_DAYS
+is set.
+.El
+.Pp
+None of them name files: the output of
+.Xr proton-drive 1 ,
+which does, is kept on the encrypted disk instead.
+.Sh FILES
+.Bl -tag -width Ds -compact
+.It Pa ~/.config/proton-firesafe/config
+Configuration.
+.It Pa ~/Library/Application Support/proton-firesafe/
+State: which disk is attached and since when, the newest takeout on each
+disk, and when each reminder was last sent.
+.It Pa ~/Library/Logs/proton-firesafe.log
+What happened, without file names.
+.It Pa ~/Library/LaunchAgents/nl.strandkip.proton-firesafe.plist
+The
+.Xr launchd 8
+agent that runs
+.Nm
+daily.
+.El
+.Pp
+On each disk:
+.Bl -tag -width Ds -compact
+.It Pa .proton-firesafe
+Marks the volume as set up.
+.It Pa .last-takeout
+When its newest takeout was started, in seconds since the epoch.
+.It Pa takeout- Ns Ar YYYYmmdd-HHMMSS Ns Pa /
+A takeout, as written by
+.Xr proton-drive 1 .
+.It Pa takeout- Ns Ar YYYYmmdd-HHMMSS Ns Pa .log
+The output of
+.Xr proton-drive 1
+for that takeout.
+.It Pa takeout- Ns Ar YYYYmmdd-HHMMSS Ns Pa .partial/
+A takeout in progress, or one that failed; deleted by the next takeout.
+.El
+.Sh EXIT STATUS
+.Ex -std
+Usage errors exit 2.
+.Sh EXAMPLES
+Find the disk's identifier, erase it as a single APFS volume, and
+encrypt it:
+.Bd -literal -offset indent
+$ diskutil list external
+$ diskutil eraseDisk APFS Firesafe-A GPT disk4
+$ diskutil apfs encryptVolume /Volumes/Firesafe-A -user disk -passprompt
+.Ed
+.Pp
+Encryption carries on in the background, and the disk can be used
+meanwhile.
+Then eject it and plug it in again while watching the screen, through
+Screen Sharing if need be, and in the password dialog tick
+.Dq Remember this password in my keychain .
+Then set it up:
+.Bd -literal -offset indent
+$ proton-firesafe init /Volumes/Firesafe-A
+.Ed
+.Pp
+Install, set
+.Ev MAILTO ,
+check that mail works, and start the daily agent:
+.Bd -literal -offset indent
+$ make install
+$ vi ~/.config/proton-firesafe/config
+$ proton-firesafe test-mail
+$ make agent
+.Ed
+.Pp
+Run the agent now, rather than waiting for the night, and watch:
+.Bd -literal -offset indent
+$ launchctl kickstart gui/$(id -u)/nl.strandkip.proton-firesafe
+$ tail -f ~/Library/Logs/proton-firesafe.log
+.Ed
+.Sh SEE ALSO
+.Xr launchctl 1 ,
+.Xr msmtp 1 ,
+.Xr proton-drive 1 ,
+.Xr launchd.plist 5 ,
+.Xr caffeinate 8 ,
+.Xr diskutil 8 ,
+.Xr launchd 8
+.Sh AUTHORS
+.An Joe Abley Aq Mt jabley@strandkip.nl ,
+with Claude.
+.Sh CAVEATS
+Every takeout is a full copy of the account, downloaded afresh; a
+takeout of hundreds of gigabytes takes hours.
+.Pp
+.Xr proton-drive 1
+does not export Proton Docs or Sheets.
+.Pp
+The agent runs in the login session, because
+.Xr proton-drive 1
+keeps its session, and macOS keeps the disks' passwords, in the login
+keychain.
+If nobody is logged in, nothing runs, and nothing can say so; a swap
+request that is overdue is the sign.
+Automatic login keeps a headless Mac logged in after a power cut.
+.Pp
+The first time the agent writes to an external disk, macOS asks whether
+.Xr sh 1
+may access files on a removable volume, and waits for an answer; so does
+.Xr security 1 ,
+reading the mail password from the keychain.
+Start the first run by hand while watching the screen, as in
+.Sx EXAMPLES ,
+and allow both.
+.Pp
+A takeout is decrypted: anyone with a disk and its password can read
+everything on it.
+Keep the password somewhere safe, and not only on the Mac, or the disk
+in the fire safe will be no use when it is needed.
