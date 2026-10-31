@@ -1,6 +1,6 @@
 .\" Copyright (c) 2026 Joe Abley <jabley@strandkip.nl>
 .\" SPDX-License-Identifier: ISC
-.Dd October 24, 2026
+.Dd October 31, 2026
 .Dt PROTON-FIRESAFE 1
 .Os
 .Sh NAME
@@ -226,6 +226,9 @@ State: which disk is attached and since when, the newest takeout on each
 disk, and when each reminder was last sent.
 .It Pa ~/Library/Logs/proton-firesafe.log
 What happened, without file names.
+.It Pa ~/.local/libexec/proton-firesafe-launch
+The launcher that the agent runs, which holds its Full Disk Access; see
+.Sx CAVEATS .
 .It Pa ~/Library/LaunchAgents/nl.strandkip.proton-firesafe.plist
 The
 .Xr launchd 8
@@ -254,16 +257,18 @@ A takeout in progress, or one that failed; deleted by the next takeout.
 .Ex -std
 Usage errors exit 2.
 .Sh EXAMPLES
-Find the disk's identifier, erase it as a single APFS volume, and
-encrypt it:
+Find the disk's identifier, erase it as a single APFS volume, find the
+volume's identifier, and encrypt it,
+.Xr diskutil 8
+asking for the passphrase:
 .Bd -literal -offset indent
-$ diskutil list external
-$ diskutil eraseDisk APFS Firesafe-A GPT disk4
-$ diskutil apfs encryptVolume /Volumes/Firesafe-A -user disk -passprompt
+$ diskutil list external physical
+$ diskutil eraseDisk APFS Firesafe-A GPT disk2
+$ diskutil info /Volumes/Firesafe-A | grep 'Device Identifier'
+$ diskutil apfs encryptVolume disk3s1 -user disk
 .Ed
 .Pp
-Encryption carries on in the background, and the disk can be used
-meanwhile.
+Encryption carries on in the background, quickly on an empty disk.
 Then eject it and plug it in again while watching the screen, through
 Screen Sharing if need be, and in the password dialog tick
 .Dq Remember this password in my keychain .
@@ -282,7 +287,10 @@ $ proton-firesafe test-mail
 $ make agent
 .Ed
 .Pp
-Run the agent now, rather than waiting for the night, and watch:
+Give
+.Pa ~/.local/libexec/proton-firesafe-launch
+Full Disk Access in System Settings, under Privacy & Security.
+Then run the agent now, rather than waiting for the night, and watch:
 .Bd -literal -offset indent
 $ launchctl kickstart gui/$(id -u)/nl.strandkip.proton-firesafe
 $ tail -f ~/Library/Logs/proton-firesafe.log
@@ -291,8 +299,10 @@ $ tail -f ~/Library/Logs/proton-firesafe.log
 .Xr launchctl 1 ,
 .Xr msmtp 1 ,
 .Xr proton-drive 1 ,
+.Xr security 1 ,
 .Xr launchd.plist 5 ,
 .Xr caffeinate 8 ,
+.Xr cron 8 ,
 .Xr diskutil 8 ,
 .Xr launchd 8
 .Sh AUTHORS
@@ -313,14 +323,32 @@ If nobody is logged in, nothing runs, and nothing can say so; a swap
 request that is overdue is the sign.
 Automatic login keeps a headless Mac logged in after a power cut.
 .Pp
-The first time the agent writes to an external disk, macOS asks whether
-.Xr sh 1
-may access files on a removable volume, and waits for an answer; so does
-.Xr security 1 ,
-reading the mail password from the keychain.
-Start the first run by hand while watching the screen, as in
-.Sx EXAMPLES ,
-and allow both.
+macOS lets a
+.Xr launchd 8
+job use an external disk only if the program responsible for the job has
+Full Disk Access, and it does not ask: it refuses, and the takeout fails
+at once.
+For a shell script, the responsible program would be the shell, and
+granting it would cover every shell script that
+.Xr launchd 8
+runs.
+So the agent runs
+.Pa proton-firesafe-launch ,
+which runs
+.Nm
+and waits for it, as
+.Xr cron 8
+does for its jobs, and can be granted Full Disk Access alone.
+The path of
+.Nm
+is compiled into it, so it can run nothing else.
+macOS ties the permission to the exact build: if the launcher is rebuilt,
+grant it again.
+.Pp
+The first time the agent reads the mail password from the keychain, macOS
+may ask whether
+.Xr security 1
+may do so; the answer is Always Allow.
 .Pp
 A takeout is decrypted: anyone with a disk and its password can read
 everything on it.

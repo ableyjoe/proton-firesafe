@@ -11,7 +11,7 @@
 
 set -u
 
-VERSION=0.1.0
+VERSION=0.2.0
 
 # ---- defaults; set any of these in the config file ---------------------------
 
@@ -342,10 +342,19 @@ Its output is in $tlog."
     # it there is no takeout.
     if [ ! -f "$partial/manifest.json" ] || ! mv "$partial" "$final"; then
         log "takeout to $disk FAILED (exit status $status)"
+        if [ -f "$tlog" ]; then
+            why="Its output, which names files and so is not included here, is in
+$tlog."
+        else
+            why="It could not even write its log on $disk, which usually means that
+macOS refused it access to the disk: proton-firesafe-launch needs Full
+Disk Access. See proton-firesafe(1)."
+        fi
         remind takeout-failed 1 "takeout to $disk failed" \
 "The Proton Drive takeout to $disk failed with exit status $status, and
-will be tried again on the next run. Its output, which names files and so
-is not included here, is in $tlog.
+will be tried again on the next run.
+
+$why
 
 The end of $LOG:
 
@@ -388,11 +397,17 @@ cmd_run() {
 
     if [ -z "$disk" ]; then
         log "no backup disk attached"
+        # Command substitution drops trailing newlines, so put the blank
+        # line after any hints back.
+        hints=$(disk_hints)
+        [ -z "$hints" ] || hints="$hints
+
+"
         remind no-disk "$REMIND_EVERY_DAYS" "no backup disk attached" \
 "No backup disk is attached to $HOST. Please plug in the one from the
 fire safe.
 
-$(disk_hints)Newest takeouts:
+${hints}Newest takeouts:
 $(summary)"
         return 0
     fi

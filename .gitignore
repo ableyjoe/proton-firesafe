@@ -1,1 +1,5 @@
 /*.plist
+/proton-firesafe-launch
+/.launch.conf
+/.agent.conf
+/*.new

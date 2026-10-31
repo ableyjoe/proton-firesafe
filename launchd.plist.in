@@ -2,7 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
   Runs proton-firesafe once a day in the login session, where it can reach
-  the keychain. Generated from launchd.plist.in by "make agent".
+  the keychain, through the launcher that holds its Full Disk Access.
+  Generated from launchd.plist.in by "make agent".
 -->
 <plist version="1.0">
 <dict>
@@ -10,7 +11,7 @@
 	<string>@LABEL@</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>@BINDIR@/proton-firesafe</string>
+		<string>@LAUNCHER@</string>
 		<string>run</string>
 	</array>
 	<key>StartCalendarInterval</key>

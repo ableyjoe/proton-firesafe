@@ -140,6 +140,11 @@ expect_no_mail() {
 
 mail_says() { last_mail | grep -q -- "$1"; }
 mail_lacks() { ! last_mail | grep -q -- "$1"; }
+mail_has_line() { last_mail | grep -qxF -- "$1"; }
+# mail_lines_follow A B: some line A is immediately followed by line B.
+mail_lines_follow() {
+    last_mail | awk -v a="$1" -v b="$2" 'p && $0 == b { f = 1 } { p = ($0 == a) } END { exit !f }'
+}
 log_says() { grep -q -- "$1" "$PROTON_FIRESAFE_LOG"; }
 
 # ---- the normal rotation ------------------------------------------------------
@@ -313,7 +318,9 @@ check "and does not mark it" [ ! -f "$V/Firesafe-A/.proton-firesafe" ]
 
 day 0
 expect_mail "a mounted disk that is not set up does not count" "no backup disk attached"
-check "the reminder says how to set it up" mail_says "proton-firesafe init $V/Firesafe-A"
+check "the reminder says how to set it up" mail_has_line "  proton-firesafe init $V/Firesafe-A"
+check "followed by a blank line" mail_lines_follow "  proton-firesafe init $V/Firesafe-A" ""
+check "then the newest takeouts" mail_lines_follow "" "Newest takeouts:"
 
 rm "$V/Firesafe-A/.stub-unencrypted"
 check "init accepts an encrypted volume" quietly day 1 init "$V/Firesafe-A/"
@@ -326,6 +333,18 @@ check "and writes nothing to it" [ "$(takeouts_on Firesafe-A)" -eq 0 ]
 rm "$V/Firesafe-A/.stub-unencrypted"
 day 3
 expect_mail "takes out once the disk is encrypted" "Firesafe-A is in place"
+
+fresh "a disk macOS will not let it write to"
+new_disk Firesafe-A
+plug Firesafe-A
+# A directory where the takeout's log should go makes writing the log fail,
+# as macOS does when the launcher has no Full Disk Access.
+mkdir "$V/Firesafe-A/$(stamp_of_day 0).log"
+day 0 2>/dev/null
+expect_mail "reports the failed takeout" "takeout to Firesafe-A failed"
+check "suggests Full Disk Access" mail_says "proton-firesafe-launch needs Full"
+check "and does not point at a log that is not there" mail_lacks "is in $V"
+check "proton-drive never ran" refute grep -q 'takeout run' "$STUB_CALLS"
 
 fresh "a locked disk"
 printf '%s\n' "/dev/disk5 (synthesized):" \
@@ -404,6 +423,33 @@ expect_mail "sends status reports when asked" "status: Vault-2 attached"
 day 3
 expect_mail "swaps as often as asked" "time to swap"
 check "naming the other disks" mail_says "plug in Vault-1 or Vault-3"
+
+# ---- the launcher ---------------------------------------------------------------
+
+if command -v cc >/dev/null 2>&1; then
+    echo "# the launcher"
+    cat >"$work/fake-firesafe" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$0" "$@" >"$LAUNCH_OUT"
+[ -z "${LAUNCH_KILL:-}" ] || kill -TERM $$
+exit "${LAUNCH_STATUS:-0}"
+EOF
+    chmod +x "$work/fake-firesafe"
+    cc -DSCRIPT="\"$work/fake-firesafe\"" -o "$work/launch" "$here/../proton-firesafe-launch.c"
+    cc -DSCRIPT="\"$work/nonexistent\"" -o "$work/launch-nothing" "$here/../proton-firesafe-launch.c"
+
+    LAUNCH_OUT="$work/launch.out" "$work/launch" run 'two words'
+    check "runs the script compiled into it" [ "$(sed -n 1p "$work/launch.out")" = "$work/fake-firesafe" ]
+    check "passes its arguments on" [ "$(sed -n '2,3p' "$work/launch.out" | tr '\n' '|')" = "run|two words|" ]
+    LAUNCH_OUT=/dev/null LAUNCH_STATUS=3 "$work/launch" run
+    check "exits as the script does" [ $? -eq 3 ]
+    LAUNCH_OUT=/dev/null LAUNCH_KILL=1 "$work/launch" run
+    check "exits 128 + n when the script is killed by signal n" [ $? -eq 143 ]
+    "$work/launch-nothing" run 2>/dev/null
+    check "exits 127 when there is no script" [ $? -eq 127 ]
+else
+    echo "# skipping the launcher: no cc"
+fi
 
 echo "1..$tests"
 [ "$failures" -eq 0 ] || echo "# $failures of $tests tests failed"
