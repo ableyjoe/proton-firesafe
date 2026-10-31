@@ -23,9 +23,10 @@ Once a day, a launchd agent runs `proton-firesafe`, which:
 
 So one disk always holds a takeout from the last week, and the one in the
 fire safe one from the last month or so. Both are APFS (Encrypted), and
-proton-firesafe will not write a takeout anywhere else. The emails never
-name your files: the takeout's own output, which does, is kept on the
-encrypted disk.
+proton-firesafe will not write a takeout anywhere else. proton-drive
+writes each file straight to its place on the disk, so no decrypted copy
+lands on the Mac's own disk on the way. The emails never name your files:
+the takeout's own output, which does, is kept on the encrypted disk.
 
 ## What you need
 
@@ -94,8 +95,8 @@ from then on. Then:
 proton-firesafe init /Volumes/Firesafe-A
 ```
 
-Optionally, stop Spotlight from indexing it: `sudo mdutil -i off
-/Volumes/Firesafe-A`.
+Optionally, stop Spotlight from indexing it: `mdutil -i off
+/Volumes/Firesafe-A`, with sudo if it refuses.
 
 Then the same for `Firesafe-B`, which can go straight into the safe. Keep
 only one disk plugged in from then on: with both attached, proton-firesafe
@@ -198,6 +199,23 @@ keychain, the answer is *Always Allow*. A first takeout of hundreds of
 gigabytes takes hours, after which you should get an email saying that
 `Firesafe-A` is in place. Anything that goes wrong before proton-firesafe
 can log it ends up in `~/Library/Logs/proton-firesafe.launchd.log`.
+
+### Watching a takeout
+
+proton-drive shows its progress only on a terminal, so the takeout's own
+log stays quiet until the end. To see that it is still going, watch the
+folder grow:
+
+```sh
+pgrep -lf proton-drive
+while true; do date; du -sk /Volumes/Firesafe-A/takeout-*.partial; sleep 30; done
+```
+
+On a gigabit connection it has managed 350–450 Mbit/s, so 500 GB takes
+about three hours. Pauses of a few minutes, with the network quiet too,
+are normal. After each file, proton-drive reads it back to check its
+SHA-1, which for a big file takes a while at a portable disk's speed.
+A takeout still running after a day gets you an email.
 
 ## Day to day
 
