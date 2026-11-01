@@ -3,7 +3,10 @@
 
 # Where to send the swap requests and reminders. Nothing is sent without it.
 MAILTO="jabley@strandkip.nl"
-#MAILFROM="proton-firesafe on manta <jabley@strandkip.nl>"
+
+# The From: header of the mail; the default is MAILTO. Subjects start
+# [proton-firesafe@HOST] whatever this says.
+#MAILFROM="Firesafe <jabley@strandkip.nl>"
 
 # The command that sends mail; it reads the message from standard input.
 #SENDMAIL="/opt/local/bin/msmtp -t"

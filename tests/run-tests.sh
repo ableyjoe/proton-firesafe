@@ -26,6 +26,7 @@ export STUB_SHELF="$work/shelf"
 export STUB_MAILBOX="$work/mailbox"
 export STUB_CALLS="$work/calls"
 V=$PROTON_FIRESAFE_VOLUMES
+HOST=$(hostname -s 2>/dev/null || hostname)
 
 BASE=1793589420 # 2 November 2026, 03:17 UTC
 DAY=86400
@@ -111,7 +112,7 @@ stamp_of_day() { date -u -d "@$((BASE + $1 * DAY))" '+takeout-%Y%m%d-%H%M%S' 2>/
 mails() { grep -c '^Subject:' "$STUB_MAILBOX"; }
 mark() { marked=$(mails); }
 new_mails() { echo $(($(mails) - marked)); }
-last_subject() { grep '^Subject:' "$STUB_MAILBOX" | tail -n 1 | sed 's/^Subject: \[proton-firesafe\] //'; }
+last_subject() { grep '^Subject:' "$STUB_MAILBOX" | tail -n 1 | sed 's/^Subject: \[proton-firesafe@[^]]*\] //'; }
 # The body of the newest message.
 last_mail() {
     awk '/^----- end of message -----$/ { last = m; m = ""; next } { m = m $0 "\n" }
@@ -237,6 +238,14 @@ check "status gives the next takeout" grep -q '^Next takeout: *17 January 2027' 
 check "status lists the other disk" grep -q 'Firesafe-B: newest takeout from 7 January 2027' "$work/status"
 
 check "every message is addressed properly" [ "$(grep -c '^To: backups@example.org$' "$STUB_MAILBOX")" -eq "$(mails)" ]
+check "and comes from MAILTO, by default" [ "$(grep -c '^From: backups@example.org$' "$STUB_MAILBOX")" -eq "$(mails)" ]
+check "every subject names proton-firesafe and the host" \
+    [ "$(grep -c "^Subject: \[proton-firesafe@$HOST\] " "$STUB_MAILBOX")" -eq "$(mails)" ]
+check "every message is signed with the host and version" \
+    [ "$(grep -c "^proton-firesafe [0-9][0-9.]* on $HOST\$" "$STUB_MAILBOX")" -eq "$(mails)" ]
+check "after a signature separator" [ "$(grep -c '^-- $' "$STUB_MAILBOX")" -eq "$(mails)" ]
+check "and the signature names the log" \
+    [ "$(grep -c "^log: $PROTON_FIRESAFE_LOG\$" "$STUB_MAILBOX")" -eq "$(mails)" ]
 check "every message has a Date" [ "$(grep -c '^Date: ' "$STUB_MAILBOX")" -eq "$(mails)" ]
 check "every message has a unique Message-ID" \
     [ "$(grep '^Message-ID: ' "$STUB_MAILBOX" | sort -u | wc -l | tr -d ' ')" -eq "$(mails)" ]
@@ -300,6 +309,14 @@ check "which still finishes" [ "$(newest_on Firesafe-A)" = "$(stamp_of_day 7)" ]
 PROTON_FIRESAFE_WARN_SECONDS=2 day 14
 sleep 3
 expect_no_mail "does not warn about a takeout that finished in time"
+
+fresh "reminders on runs that start a little early"
+day 0
+expect_mail "asks for a disk" "no backup disk attached"
+day 7 -1
+expect_mail "asks again a week later, though the run started an hour early" "no backup disk attached"
+day 13
+expect_no_mail "but not six days after that"
 
 fresh "mail that cannot be sent"
 STUB_MAIL_FAIL=1 day 0
@@ -408,11 +425,13 @@ TAKEOUT_EVERY_DAYS=1
 SWAP_AFTER_DAYS=3
 KEEP_TAKEOUTS=1
 STATUS_EVERY_DAYS=2
+MAILFROM="Firesafe <firesafe@example.org>"
 EOF
 new_disk Vault-2
 plug Vault-2
 day 0
 expect_mail "uses the disks named in the config file" "Vault-2 is in place"
+check "and MAILFROM" grep -qx 'From: Firesafe <firesafe@example.org>' "$STUB_MAILBOX"
 check "and the sections" grep -q 'takeout run -i my-files -i revisions ' "$STUB_CALLS"
 day 1
 check "takes out as often as asked" [ "$(newest_on Vault-2)" = "$(stamp_of_day 1)" ]

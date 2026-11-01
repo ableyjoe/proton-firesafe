@@ -11,7 +11,7 @@
 
 set -u
 
-VERSION=0.2.0
+VERSION=0.3.0
 
 # ---- defaults; set any of these in the config file ---------------------------
 
@@ -25,7 +25,7 @@ KEEP_TAKEOUTS=2                    # complete takeouts to keep on each disk
 TAKEOUT_WARN_HOURS=24              # mail if a takeout is still running after this long; 0 for never
 ALLOW_UNENCRYPTED=no               # write takeouts to unencrypted volumes too
 MAILTO=""                          # where to send mail; nothing is sent without it
-MAILFROM=""                        # default: "proton-firesafe on HOST <MAILTO>"
+MAILFROM=""                        # the From: header; default: MAILTO
 SENDMAIL="/opt/local/bin/msmtp -t"
 PROTON_DRIVE=/opt/local/bin/proton-drive
 
@@ -51,7 +51,7 @@ if [ -f "$CONFIG" ]; then
     # shellcheck disable=SC1090
     . "$CONFIG" || die "cannot read $CONFIG"
 fi
-[ -n "$MAILFROM" ] || MAILFROM="proton-firesafe on $HOST <$MAILTO>"
+[ -n "$MAILFROM" ] || MAILFROM=$MAILTO
 
 whole_number() {
     case $2 in
@@ -101,14 +101,18 @@ send_mail() {
     if printf '%s\n' \
         "From: $MAILFROM" \
         "To: $MAILTO" \
-        "Subject: [proton-firesafe] $1" \
+        "Subject: [proton-firesafe@$HOST] $1" \
         "Date: $(LC_ALL=C date '+%a, %d %b %Y %H:%M:%S %z')" \
         "Message-ID: <proton-firesafe.$NOW.$$.$MAILNO@$HOST>" \
         "MIME-Version: 1.0" \
         "Content-Type: text/plain; charset=utf-8" \
         "Content-Transfer-Encoding: 8bit" \
         "" \
-        "$2" | $SENDMAIL; then
+        "$2" \
+        "" \
+        "-- " \
+        "proton-firesafe $VERSION on $HOST" \
+        "log: $LOG" | $SENDMAIL; then
         log "mailed: $1"
     else
         log "FAILED to send mail: $1"
@@ -116,10 +120,11 @@ send_mail() {
     fi
 }
 
-# remind KEY DAYS SUBJECT BODY: mail about KEY at most once every DAYS days.
+# remind KEY DAYS SUBJECT BODY: mail about KEY at most once every DAYS days,
+# give or take the same few hours as everything else.
 remind() {
     _last=$(get "remind-$1" 0)
-    [ $((NOW - _last)) -ge $(($2 * DAY)) ] || return 0
+    [ "$(days_between "$_last" "$NOW")" -ge "$2" ] || return 0
     send_mail "$3" "$4" && put "remind-$1" "$NOW"
 }
 forget() { rm -f "$STATE/remind-$1"; }

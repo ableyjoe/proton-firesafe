@@ -1,6 +1,6 @@
 .\" Copyright (c) 2026 Joe Abley <jabley@strandkip.nl>
 .\" SPDX-License-Identifier: ISC
-.Dd October 31, 2026
+.Dd November 1, 2026
 .Dt PROTON-FIRESAFE 1
 .Os
 .Sh NAME
@@ -114,9 +114,10 @@ Without it, nothing is sent; what would have been is logged.
 .It Ev MAILFROM
 The
 .Ql "From:"
-of the email.
+of the email, such as
+.Ql "Firesafe <you@example.net>" .
 The default is
-.Ql proton-firesafe on Ar host Aq Ev MAILTO .
+.Ev MAILTO .
 .It Ev SENDMAIL
 The command that sends a message, which it reads, headers and all, from
 its standard input.
@@ -178,7 +179,12 @@ Do not.
 .Sh EMAIL
 .Nm
 sends these messages, each with a subject starting
-.Ql [proton-firesafe] .
+.Ql [proton-firesafe@ Ns Ar host Ns ] ,
+where
+.Ar host
+is the short host name, and a signature giving the host, the version of
+.Nm ,
+and its log.
 .Bl -tag -width Ds
 .It no backup disk attached
 No set-up disk is mounted.
