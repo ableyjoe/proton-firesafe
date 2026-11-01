@@ -211,11 +211,17 @@ pgrep -lf proton-drive
 while true; do date; du -sk /Volumes/Firesafe-A/takeout-*.partial; sleep 30; done
 ```
 
-On a gigabit connection it has managed 350–450 Mbit/s, so 500 GB takes
-about three hours. Pauses of a few minutes, with the network quiet too,
+How long it takes depends more on how many files you have than on how
+big they are. On a gigabit connection, big files came down at 350–450
+Mbit/s, but proton-drive fetches only five files at a time, each needing
+several round trips, so folders of small files went at about ten files a
+second. The first takeout of 500 GB took about 19 hours, nearly all of it
+on the small files. Pauses of a few minutes, with the network quiet too,
 are normal. After each file, proton-drive reads it back to check its
 SHA-1, which for a big file takes a while at a portable disk's speed.
-A takeout still running after a day gets you an email.
+
+A takeout still running after a day gets you an email. If yours
+routinely take that long, raise `TAKEOUT_WARN_HOURS` in the config file.
 
 ## Day to day
 
