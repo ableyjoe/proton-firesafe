@@ -1,4 +1,6 @@
-# proton-firesafe configuration; see proton-firesafe(1).
+# proton-firesafe configuration; see proton-firesafe(1). make install puts
+# it in /usr/local/etc/proton-firesafe.conf, owned by root: proton-firesafe
+# runs it as code, with Full Disk Access, so edit it with doas or sudo.
 # This is sh(1): no spaces around the =, and quote values with spaces.
 
 # Where to send the swap requests and reminders. Nothing is sent without it.

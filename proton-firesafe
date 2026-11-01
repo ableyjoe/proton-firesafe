@@ -11,7 +11,7 @@
 
 set -u
 
-VERSION=0.3.0
+VERSION=0.4.0
 
 # ---- defaults; set any of these in the config file ---------------------------
 
@@ -31,10 +31,11 @@ PROTON_DRIVE=/opt/local/bin/proton-drive
 
 # ---- environment; the overrides exist for the test suite -------------------------
 
+# make install fills in the @...@ paths, from SYSCONFDIR and LOCALSTATEDIR.
 PATH=${PROTON_FIRESAFE_PATH:-/opt/local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin}
-CONFIG=${PROTON_FIRESAFE_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/proton-firesafe/config}
-STATE=${PROTON_FIRESAFE_STATE:-"$HOME/Library/Application Support/proton-firesafe"}
-LOG=${PROTON_FIRESAFE_LOG:-"$HOME/Library/Logs/proton-firesafe.log"}
+CONFIG=${PROTON_FIRESAFE_CONFIG:-@CONFIG@}
+STATE=${PROTON_FIRESAFE_STATE:-@STATEDIR@}
+LOG=${PROTON_FIRESAFE_LOG:-@LOG@}
 VOLUMES=${PROTON_FIRESAFE_VOLUMES:-/Volumes}
 NOW=${PROTON_FIRESAFE_NOW:-$(date +%s)}
 export PATH
@@ -46,6 +47,12 @@ HOST=$(hostname -s 2>/dev/null || hostname)
 MAILNO=0
 
 die() { echo "proton-firesafe: $*" >&2; exit 1; }
+
+for _p in "$CONFIG" "$STATE" "$LOG"; do
+    case $_p in
+    @*) die "run the copy that make install put in place, not this one" ;;
+    esac
+done
 
 if [ -f "$CONFIG" ]; then
     # shellcheck disable=SC1090

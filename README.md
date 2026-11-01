@@ -57,7 +57,8 @@ the takeout's own output, which does, is kept on the encrypted disk.
 
 ## Preparing the disks
 
-Do one disk at a time, with only that one plugged in, so that the label on
+The last step uses `proton-firesafe init`, so do [Installing](#installing)
+first. Do one disk at a time, with only that one plugged in, so that the label on
 each case matches the name of its volume. Find the disk:
 
 ```sh
@@ -105,20 +106,36 @@ for a swap.
 
 ## Installing
 
+Build as yourself, then install as root (`sudo` does as well as `doas`):
+
 ```sh
 git clone https://github.com/ableyjoe/proton-firesafe.git
 cd proton-firesafe
-make install
+make
+doas make install
 ```
 
-This builds and installs `proton-firesafe`, its launcher and its manual
-page under `~/.local`, and a config file in
-`~/.config/proton-firesafe/config`. Check `MAILTO` in it; everything else
-has sensible defaults, described in `proton-firesafe(1)`.
+This installs:
 
-To install somewhere else, say `make install PREFIX=$HOME/local`, and give
-`make agent` the same `PREFIX` later. Run make as yourself, not with
-`sudo`: the config file and the agent belong in your home folder.
+| What | Where |
+|---|---|
+| `proton-firesafe` | `/usr/local/bin` |
+| its launcher | `/usr/local/libexec` |
+| its manual page | `/usr/local/share/man/man1` |
+| a config file, unless there is one already | `/usr/local/etc/proton-firesafe.conf` |
+| its state | `/var/db/proton-firesafe/` |
+| its logs | `/var/log/proton-firesafe/` |
+
+The programs and the config file belong to root. proton-firesafe runs with
+Full Disk Access (see [The daily run](#the-daily-run)) and runs its config
+file as code, so only root should be able to change them. The state and
+log directories belong to you, because the agent runs as you; `make
+install` finds out who you are from doas or sudo. Check `MAILTO` in the
+config file, with `doas vi /usr/local/etc/proton-firesafe.conf`;
+everything else has sensible defaults, described in `proton-firesafe(1)`.
+
+To install elsewhere, give every make command the same `PREFIX`, and
+`LOCALSTATEDIR` for the state and logs, such as `PREFIX=/opt/firesafe`.
 
 ### Mail
 
@@ -160,6 +177,8 @@ proton-firesafe test-mail
 
 ### The daily run
 
+As yourself, not as root:
+
 ```sh
 make agent
 ```
@@ -179,7 +198,12 @@ that run the script and wait for it, as cron does for its jobs; the
 script's path is compiled in, so the launcher can run nothing else. In
 System Settings → Privacy & Security → Full Disk Access, click **+**, press
 Cmd-Shift-G, and paste the launcher's path, which `make agent` prints:
-`~/.local/libexec/proton-firesafe-launch` by default.
+`/usr/local/libexec/proton-firesafe-launch` by default.
+
+Because the script, the launcher and the config file belong to root, only
+root can change what runs with that access, with one exception: the
+`passwordeval` command in your `~/.msmtprc`, which msmtp runs to fetch the
+mail password.
 
 macOS ties that permission to the exact build, so if the launcher is ever
 rebuilt (because `PREFIX` changed, or its source did), remove it from the
@@ -191,14 +215,14 @@ first takeout now and watch it:
 
 ```sh
 launchctl kickstart gui/$(id -u)/nl.strandkip.proton-firesafe
-tail -f ~/Library/Logs/proton-firesafe.log
+tail -f /var/log/proton-firesafe/proton-firesafe.log
 ```
 
 If macOS asks whether `security` may read the msmtp password from the
 keychain, the answer is *Always Allow*. A first takeout of hundreds of
 gigabytes takes hours, after which you should get an email saying that
 `Firesafe-A` is in place. Anything that goes wrong before proton-firesafe
-can log it ends up in `~/Library/Logs/proton-firesafe.launchd.log`.
+can log it ends up in `/var/log/proton-firesafe/launchd.log`.
 
 ### Watching a takeout
 

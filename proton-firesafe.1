@@ -105,8 +105,10 @@ Print the version.
 reads the
 .Xr sh 1
 file
-.Pa ~/.config/proton-firesafe/config ,
+.Pa /usr/local/etc/proton-firesafe.conf ,
 if it exists, which can set any of the following.
+It runs as code, with the launcher's Full Disk Access, so it belongs to
+root.
 .Bl -tag -width Ds
 .It Ev MAILTO
 Where to send email.
@@ -225,14 +227,19 @@ None of them name files: the output of
 which does, is kept on the encrypted disk instead.
 .Sh FILES
 .Bl -tag -width Ds -compact
-.It Pa ~/.config/proton-firesafe/config
+.It Pa /usr/local/etc/proton-firesafe.conf
 Configuration.
-.It Pa ~/Library/Application Support/proton-firesafe/
+.It Pa /var/db/proton-firesafe/
 State: which disk is attached and since when, the newest takeout on each
 disk, and when each reminder was last sent.
-.It Pa ~/Library/Logs/proton-firesafe.log
+It belongs to the user the agent runs as.
+.It Pa /var/log/proton-firesafe/proton-firesafe.log
 What happened, without file names.
-.It Pa ~/.local/libexec/proton-firesafe-launch
+.It Pa /var/log/proton-firesafe/launchd.log
+Anything that went wrong before
+.Nm
+could log it.
+.It Pa /usr/local/libexec/proton-firesafe-launch
 The launcher that the agent runs, which holds its Full Disk Access; see
 .Sx CAVEATS .
 .It Pa ~/Library/LaunchAgents/nl.strandkip.proton-firesafe.plist
@@ -283,23 +290,24 @@ Then set it up:
 $ proton-firesafe init /Volumes/Firesafe-A
 .Ed
 .Pp
-Install, set
+Build as yourself, install as root, set
 .Ev MAILTO ,
-check that mail works, and start the daily agent:
+check that mail works, and start the daily agent as yourself:
 .Bd -literal -offset indent
-$ make install
-$ vi ~/.config/proton-firesafe/config
+$ make
+$ doas make install
+$ doas vi /usr/local/etc/proton-firesafe.conf
 $ proton-firesafe test-mail
 $ make agent
 .Ed
 .Pp
 Give
-.Pa ~/.local/libexec/proton-firesafe-launch
+.Pa /usr/local/libexec/proton-firesafe-launch
 Full Disk Access in System Settings, under Privacy & Security.
 Then run the agent now, rather than waiting for the night, and watch:
 .Bd -literal -offset indent
 $ launchctl kickstart gui/$(id -u)/nl.strandkip.proton-firesafe
-$ tail -f ~/Library/Logs/proton-firesafe.log
+$ tail -f /var/log/proton-firesafe/proton-firesafe.log
 .Ed
 .Sh SEE ALSO
 .Xr launchctl 1 ,
@@ -347,7 +355,17 @@ and waits for it, as
 does for its jobs, and can be granted Full Disk Access alone.
 The path of
 .Nm
-is compiled into it, so it can run nothing else.
+is compiled into it, so it can run nothing else, and
+.Nm ,
+the launcher and the configuration file belong to root, so that only root
+can change what runs with that access.
+Your own account can still change one command that runs with it: the
+.Ic passwordeval
+command in
+.Pa ~/.msmtprc ,
+which
+.Xr msmtp 1
+runs to fetch the mail password.
 macOS ties the permission to the exact build: if the launcher is rebuilt,
 grant it again.
 .Pp

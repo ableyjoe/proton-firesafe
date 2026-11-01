@@ -24,8 +24,8 @@
 	<key>ProcessType</key>
 	<string>Standard</string>
 	<key>StandardOutPath</key>
-	<string>@HOME@/Library/Logs/proton-firesafe.launchd.log</string>
+	<string>@LOGDIR@/launchd.log</string>
 	<key>StandardErrorPath</key>
-	<string>@HOME@/Library/Logs/proton-firesafe.launchd.log</string>
+	<string>@LOGDIR@/launchd.log</string>
 </dict>
 </plist>

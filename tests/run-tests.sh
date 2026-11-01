@@ -405,6 +405,9 @@ day 1
 expect_mail "and counts as a swap" "Firesafe-A should be in the fire safe"
 
 check "version prints the version" sh -c "'$script' version | grep -q '^proton-firesafe [0-9]'"
+check "the script refuses to run before make install fills in its paths" \
+    refute quietly env -u PROTON_FIRESAFE_STATE "$script" status
+check "and says so" sh -c "env -u PROTON_FIRESAFE_LOG '$script' status 2>&1 | grep -q 'make install'"
 check "an unknown command fails with status 2" sh -c "'$script' frobnicate 2>/dev/null; [ \$? -eq 2 ]"
 
 echo 'SWAP_AFTER_DAYS=fortnight' >>"$PROTON_FIRESAFE_CONFIG"
