@@ -100,9 +100,9 @@ Give every step the same `PREFIX` and other overrides.
   sends at most once per interval.
 - **Heartbeat.** `HEARTBEAT_URL` is fetched with curl at the start and end
   of every `run`, for a service such as healthchecks.io or deadman to
-  alert when runs stop, the one failure no mail can report. Healthchecks ping URLs are
-  `https://hc-ping.com/<uuid>` or `https://hc-ping.com/<ping-key>/<slug>`;
-  a ping key alone is not one.
+  alert when runs stop, the one failure no mail can report. Healthchecks
+  ping URLs are `https://hc-ping.com/<uuid>` or
+  `https://hc-ping.com/<ping-key>/<slug>`; a ping key alone is not one.
 - **Watchdog.** launchd starts no new run while one is going, so a hung
   takeout would be silent; a background subshell mails after
   `TAKEOUT_WARN_HOURS`. It checks a flag file after sleeping, so killing it
