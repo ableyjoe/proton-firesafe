@@ -491,6 +491,7 @@ day 6
 expect_no_mail "sends nothing for six days"
 day 7
 expect_mail "sends a status report after a week without mail" "status: Firesafe-A attached"
+check "saying it is still running" mail_says "just to say that it is still running"
 check "giving the next takeout" mail_says "Next takeout: *16 November 2026"
 check "and the swap" mail_says "Swap due: *30 November 2026"
 check "and the room left" mail_says "has [0-9]* GB free"

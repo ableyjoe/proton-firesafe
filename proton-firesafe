@@ -577,8 +577,8 @@ $(outlook "$disk")"
     elif [ "$STATUS_EVERY_DAYS" -gt 0 ] &&
         [ "$(days_between "$(get last-mail 0)" "$NOW")" -ge "$STATUS_EVERY_DAYS" ]; then
         send_mail "status: $disk attached" \
-"Nothing has needed doing since proton-firesafe last sent mail, so this
-is to say that it is still running.
+"There has been nothing to report since proton-firesafe last sent mail,
+so this is just to say that it is still running.
 
 $(outlook "$disk")"
     fi
