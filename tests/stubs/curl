@@ -1,0 +1,5 @@
+#!/bin/sh
+# Stands in for curl(1) when proton-firesafe sends a heartbeat: records the
+# call, and fails if STUB_CURL_FAIL is set.
+echo "curl $*" >>"${STUB_CALLS:-/dev/null}"
+[ -z "${STUB_CURL_FAIL:-}" ] || exit 7

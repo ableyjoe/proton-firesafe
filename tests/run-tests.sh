@@ -113,6 +113,24 @@ mails() { grep -c '^Subject:' "$STUB_MAILBOX"; }
 mark() { marked=$(mails); }
 new_mails() { echo $(($(mails) - marked)); }
 last_subject() { grep '^Subject:' "$STUB_MAILBOX" | tail -n 1 | sed 's/^Subject: \[proton-firesafe@[^]]*\] //'; }
+new_subjects() {
+    grep '^Subject:' "$STUB_MAILBOX" | tail -n "$(new_mails)" | sed 's/^Subject: \[proton-firesafe@[^]]*\] //'
+}
+
+# expect_mails DESCRIPTION SUBJECT-PATTERN...: exactly these new messages.
+expect_mails() {
+    _desc=$1
+    shift
+    _ok=yes
+    [ "$(new_mails)" -eq $# ] || _ok=no
+    for _p; do new_subjects | grep -q -- "$_p" || _ok=no; done
+    if [ "$_ok" = yes ]; then
+        ok "$_desc"
+    else
+        not_ok "$_desc (got: $(new_subjects | tr '\n' '|'))"
+    fi
+    mark
+}
 # The body of the newest message.
 last_mail() {
     awk '/^----- end of message -----$/ { last = m; m = ""; next } { m = m $0 "\n" }
@@ -172,7 +190,10 @@ check "the takeout's own log is kept beside it, on the disk" [ -f "$V/Firesafe-A
 check "takeout was asked for the default sections" \
     grep -q 'takeout run -i my-files -i devices -i photos ' "$STUB_CALLS"
 check "proton-firesafe's log does not name exported files" refute log_says "secret-plans"
-check "the announcement gives the date of the next swap" mail_says "due on 2 December 2026"
+check "the announcement says what the takeout holds" mail_says "holds 102 kB in 1 file\."
+check "and how long it took" mail_says "It took less than a minute\."
+check "and gives the date of the next takeout" mail_says "Next takeout: *11 November 2026"
+check "and of the swap" mail_says "Swap due: *2 December 2026"
 
 for n in 3 4 5 6 7 8; do day $n; done
 expect_no_mail "sends nothing on the days between takeouts"
@@ -180,14 +201,18 @@ check "makes no takeout on the days between" [ "$(takeouts_on Firesafe-A)" -eq 1
 
 day 9 -1
 check "takes out again a week later, an hour early by the clock" [ "$(takeouts_on Firesafe-A)" -eq 2 ]
-expect_no_mail "sends nothing for a routine takeout"
+expect_mail "reports a routine takeout" "takeout to Firesafe-A finished"
+check "naming it" mail_says "The takeout, $(stamp_of_day 9 | sed 's/031700$/021700/'), holds"
+check "giving the next takeout" mail_says "Next takeout: *18 November 2026"
 
 day 16
 check "keeps only two takeouts" [ "$(takeouts_on Firesafe-A)" -eq 2 ]
 check "deletes the oldest takeout" [ ! -d "$V/Firesafe-A/$(stamp_of_day 2)" ]
 check "deletes the oldest takeout's log" [ ! -f "$V/Firesafe-A/$(stamp_of_day 2).log" ]
+expect_mail "reports the next one" "takeout to Firesafe-A finished"
 
 day 23
+expect_mail "and the next" "takeout to Firesafe-A finished"
 day 29
 expect_no_mail "does not ask for a swap a day early"
 check "the disk is still attached on day 29" [ -d "$V/Firesafe-A" ]
@@ -198,6 +223,7 @@ check "takes out once more before the swap" [ "$(newest_on Firesafe-A)" = "$(sta
 check "ejects the disk" [ ! -d "$V/Firesafe-A" ]
 check "the swap request names the disk to plug in" mail_says "plug in Firesafe-B"
 check "the swap request gives the newest takeout" mail_says "Firesafe-A: newest takeout from 2 December 2026"
+check "and says what it holds, as its only message" mail_says "The takeout, $(stamp_of_day 30), holds"
 
 day 31
 expect_no_mail "does not nag the day after the swap request"
@@ -212,8 +238,12 @@ expect_mail "takes out to the other disk, and says so" "Firesafe-B is in place"
 check "the other disk has a takeout" [ "$(takeouts_on Firesafe-B)" -eq 1 ]
 check "the announcement lists both disks" mail_says "Firesafe-A: newest takeout from 2 December 2026"
 
-for n in 45 52 59 65; do day $n; done
-expect_no_mail "four quiet weeks"
+for n in 45 52 59; do
+    day $n
+    expect_mail "reports the weekly takeout on day $n" "takeout to Firesafe-B finished"
+done
+day 65
+expect_no_mail "and nothing in between"
 day 66
 expect_mail "asks for the next swap" "time to swap"
 check "this time asks for Firesafe-A back" mail_says "plug in Firesafe-A"
@@ -289,11 +319,14 @@ STUB_DF_FREE_KB=10 day 17
 expect_no_mail "reports a full disk only once a week"
 day 18
 check "takes out when there is room again" [ "$(newest_on Firesafe-A)" = "$(stamp_of_day 18)" ]
-expect_no_mail "quietly"
+expect_mail "and reports it" "takeout to Firesafe-A finished"
 
 day 25
+expect_mail "reports the next takeout" "takeout to Firesafe-A finished"
+check "which will come early, for the swap" mail_says "Next takeout: *30 November 2026"
 STUB_EJECT_FAIL=1 day 28
-expect_mail "reports a disk that will not eject" "could not eject Firesafe-A"
+expect_mails "reports a disk that will not eject, and the takeout before it" \
+    "could not eject Firesafe-A" "takeout to Firesafe-A finished"
 check "which is still attached" [ -d "$V/Firesafe-A" ]
 day 29
 expect_mail "ejects it on the next run" "time to swap"
@@ -304,11 +337,12 @@ plug Firesafe-A
 day 0
 mark
 STUB_TAKEOUT_SECONDS=3 PROTON_FIRESAFE_WARN_SECONDS=1 day 7
-expect_mail "warns about a takeout that is still running" "takeout to Firesafe-A is taking a long time"
+expect_mails "warns about a takeout that is still running, then reports it" \
+    "takeout to Firesafe-A is taking a long time" "takeout to Firesafe-A finished"
 check "which still finishes" [ "$(newest_on Firesafe-A)" = "$(stamp_of_day 7)" ]
 PROTON_FIRESAFE_WARN_SECONDS=2 day 14
 sleep 3
-expect_no_mail "does not warn about a takeout that finished in time"
+expect_mail "does not warn about a takeout that finished in time" "takeout to Firesafe-A finished"
 
 fresh "reminders on runs that start a little early"
 day 0
@@ -396,7 +430,8 @@ expect_mail "test-mail sends a message" "test message"
 
 new_disk Firesafe-A
 plug Firesafe-A
-day 0 takeout >/dev/null
+day 0 takeout >"$work/takeout.out"
+check "takeout says what the takeout holds" grep -q 'holds 102 kB in 1 file' "$work/takeout.out"
 check "takeout makes a takeout on demand" [ "$(takeouts_on Firesafe-A)" -eq 1 ]
 day 0 eject >/dev/null
 check "eject ejects the disk" [ ! -d "$V/Firesafe-A" ]
@@ -439,12 +474,56 @@ check "and the sections" grep -q 'takeout run -i my-files -i revisions ' "$STUB_
 day 1
 check "takes out as often as asked" [ "$(newest_on Vault-2)" = "$(stamp_of_day 1)" ]
 check "keeps as few takeouts as asked" [ "$(takeouts_on Vault-2)" -eq 1 ]
-expect_no_mail "no status report yet"
+expect_mail "reports each takeout" "takeout to Vault-2 finished"
 day 2
-expect_mail "sends status reports when asked" "status: Vault-2 attached"
+expect_mail "which counts as a status report" "takeout to Vault-2 finished"
 day 3
 expect_mail "swaps as often as asked" "time to swap"
 check "naming the other disks" mail_says "plug in Vault-1 or Vault-3"
+
+fresh "status reports"
+echo 'TAKEOUT_EVERY_DAYS=14' >>"$PROTON_FIRESAFE_CONFIG"
+new_disk Firesafe-A
+plug Firesafe-A
+day 0
+expect_mail "announces the disk" "Firesafe-A is in place"
+day 6
+expect_no_mail "sends nothing for six days"
+day 7
+expect_mail "sends a status report after a week without mail" "status: Firesafe-A attached"
+check "giving the next takeout" mail_says "Next takeout: *16 November 2026"
+check "and the swap" mail_says "Swap due: *30 November 2026"
+check "and the room left" mail_says "has [0-9]* GB free"
+day 13
+expect_no_mail "then nothing for six days"
+day 14
+expect_mail "reports the fortnightly takeout" "takeout to Firesafe-A finished"
+day 21
+expect_mail "and another status report a week after that" "status: Firesafe-A attached"
+
+fresh "no status reports"
+printf 'TAKEOUT_EVERY_DAYS=14\nSTATUS_EVERY_DAYS=0\n' >>"$PROTON_FIRESAFE_CONFIG"
+new_disk Firesafe-A
+plug Firesafe-A
+day 0
+mark
+day 7
+expect_no_mail "STATUS_EVERY_DAYS=0 turns them off"
+
+fresh "heartbeats"
+day 0
+check "no heartbeat without HEARTBEAT_URL" refute grep -qs '^curl' "$STUB_CALLS"
+echo 'HEARTBEAT_URL=https://hc-ping.example/abc' >>"$PROTON_FIRESAFE_CONFIG"
+: >"$STUB_CALLS"
+day 1
+check "a heartbeat at the start and end of every run" \
+    [ "$(grep -c '^curl .* https://hc-ping.example/abc$' "$STUB_CALLS")" -eq 2 ]
+STUB_CURL_FAIL=1 day 2
+check "a failed heartbeat does not stop the run" [ $? -eq 0 ]
+check "but is logged" log_says "heartbeat to https://hc-ping.example/abc failed"
+: >"$STUB_CALLS"
+day 3 status >/dev/null
+check "other commands send no heartbeat" refute grep -qs '^curl' "$STUB_CALLS"
 
 # ---- the launcher ---------------------------------------------------------------
 

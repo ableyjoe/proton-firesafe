@@ -30,5 +30,11 @@ MAILTO="jabley@strandkip.nl"
 # Mail if a takeout is still running after this many hours; 0 for never.
 #TAKEOUT_WARN_HOURS=24
 
-# Set to 7 for a weekly "all is well" message.
-#STATUS_EVERY_DAYS=0
+# Every takeout is reported by mail. If nothing at all has been sent for
+# this many days, send a status report instead; 0 for never.
+#STATUS_EVERY_DAYS=7
+
+# A URL to fetch at the start and end of every run, such as a check's ping
+# URL at healthchecks.io, which then mails you if the fetches stop: the Mac
+# off, nobody logged in, the agent gone. Nothing about your files is sent.
+#HEARTBEAT_URL="https://hc-ping.com/your-check-uuid"

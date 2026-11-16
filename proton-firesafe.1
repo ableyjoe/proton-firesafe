@@ -1,6 +1,6 @@
 .\" Copyright (c) 2026 Joe Abley <jabley@strandkip.nl>
 .\" SPDX-License-Identifier: ISC
-.Dd November 1, 2026
+.Dd November 16, 2026
 .Dt PROTON-FIRESAFE 1
 .Os
 .Sh NAME
@@ -168,10 +168,25 @@ How long a takeout can run before
 sends email to say that it is still going, or 0 for never.
 The default is 24.
 .It Ev STATUS_EVERY_DAYS
-How often to send a report that all is well, or 0 for never.
-The default is 0, since the swap requests come often enough to show that
+How long
 .Nm
-is still running.
+can go without sending mail before it sends a status report, saying when
+the next takeout and swap are due, or 0 for never.
+The default is 7, so that with weekly takeouts, each of which is reported,
+a status report goes out only when something stops takeouts happening.
+Mail that stops coming is the sign that
+.Nm
+has stopped running, so it should come often enough to be missed.
+.It Ev HEARTBEAT_URL
+A URL to fetch with
+.Xr curl 1
+at the start and end of every run, such as one from a service like
+healthchecks.io that sends its own alert when the fetches stop coming.
+That catches what no mail from
+.Nm
+can: the Mac being off, nobody being logged in, or the agent having gone.
+The fetch carries nothing about the takeouts.
+Unset by default.
 .It Ev ALLOW_UNENCRYPTED
 Set to
 .Ql yes
@@ -197,6 +212,11 @@ If a disk seems to be attached but locked, or mounted but not set up,
 the message says so.
 .It Ar disk No is in place
 The first takeout on a newly attached disk has finished.
+.It takeout to Ar disk No finished
+Any later takeout has finished.
+This and the previous message say what the takeout holds and how long it
+took, and end, as status reports do, with when the next takeout and swap
+are due.
 .It time to swap the backup disks
 The attached disk has had its last takeout and been ejected.
 .It Ar disk No should be in the fire safe
@@ -213,14 +233,19 @@ It may just be big, or it may be stuck; while it runs,
 .Xr launchd 8
 starts no other run, so nothing else would say so.
 .It takeout to Ar disk No finished with Ar n No failed item(s)
+Instead of either of the previous two, if some items could not be
+exported.
+The rest of the takeout is kept, and counts.
 .It Ar disk No is too full for a new takeout
 .It Ar disk No is not encrypted
 .It could not eject Ar disk
 .It status: Ar disk No attached
-Only if
-.Ev STATUS_EVERY_DAYS
-is set.
+Nothing has been sent for
+.Ev STATUS_EVERY_DAYS .
 .El
+.Pp
+The time to swap message, when it follows a takeout, says what that
+takeout holds too: a run sends at most one of these reports.
 .Pp
 None of them name files: the output of
 .Xr proton-drive 1 ,
@@ -310,6 +335,7 @@ $ launchctl kickstart gui/$(id -u)/nl.strandkip.proton-firesafe
 $ tail -f /var/log/proton-firesafe/proton-firesafe.log
 .Ed
 .Sh SEE ALSO
+.Xr curl 1 ,
 .Xr launchctl 1 ,
 .Xr msmtp 1 ,
 .Xr proton-drive 1 ,

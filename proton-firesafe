@@ -11,7 +11,7 @@
 
 set -u
 
-VERSION=0.4.0
+VERSION=0.5.0
 
 # ---- defaults; set any of these in the config file ---------------------------
 
@@ -20,13 +20,14 @@ SECTIONS="my-files devices photos" # takeout sections; revisions is the other
 TAKEOUT_EVERY_DAYS=7               # make a fresh takeout this often
 SWAP_AFTER_DAYS=28                 # ask for a swap once a disk has been attached this long
 REMIND_EVERY_DAYS=7                # repeat reminders this often
-STATUS_EVERY_DAYS=0                # send an "all is well" report this often; 0 for never
+STATUS_EVERY_DAYS=7                # mail a status report if nothing else went out for this long; 0 for never
 KEEP_TAKEOUTS=2                    # complete takeouts to keep on each disk
 TAKEOUT_WARN_HOURS=24              # mail if a takeout is still running after this long; 0 for never
 ALLOW_UNENCRYPTED=no               # write takeouts to unencrypted volumes too
 MAILTO=""                          # where to send mail; nothing is sent without it
 MAILFROM=""                        # the From: header; default: MAILTO
 SENDMAIL="/opt/local/bin/msmtp -t"
+HEARTBEAT_URL=""                   # fetched at the start and end of every run, if set
 PROTON_DRIVE=/opt/local/bin/proton-drive
 
 # ---- environment; the overrides exist for the test suite -------------------------
@@ -121,6 +122,7 @@ send_mail() {
         "proton-firesafe $VERSION on $HOST" \
         "log: $LOG" | $SENDMAIL; then
         log "mailed: $1"
+        put last-mail "$NOW"
     else
         log "FAILED to send mail: $1"
         return 1
@@ -170,10 +172,28 @@ kb_to_gb() { awk -v kb="$1" 'BEGIN { printf "%.0f GB\n", kb * 1024 / 1e9 }'; }
 # When the takeout on a disk was made, or 0 for never.
 last_takeout() { cat "$VOLUMES/$1/.last-takeout" 2>/dev/null || echo 0; }
 
-# Items a takeout could not export, according to its manifest.
-failed_items() {
-    sed -n 's/.*"failedItems": *\([0-9]*\).*/\1/p' "$1" 2>/dev/null |
-        awk '{ n += $1 } END { print n + 0 }'
+# manifest_sum FIELD MANIFEST: the total of a takeout's transfer summaries,
+# such as failedItems or downloadedBytes.
+manifest_sum() {
+    sed -n "s/.*\"$1\": *\\([0-9]*\\).*/\\1/p" "$2" 2>/dev/null |
+        awk '{ n += $1 } END { printf "%.0f\n", n }'
+}
+
+fmt_bytes() {
+    awk -v b="$1" 'BEGIN {
+        if (b >= 1e9) printf "%.0f GB\n", b / 1e9
+        else if (b >= 1e6) printf "%.0f MB\n", b / 1e6
+        else printf "%.0f kB\n", b / 1e3
+    }'
+}
+
+fmt_duration() {
+    awk -v s="$1" 'BEGIN {
+        h = int(s / 3600); m = int((s % 3600) / 60)
+        if (h > 0) printf "%d hour%s %d minute%s\n", h, h == 1 ? "" : "s", m, m == 1 ? "" : "s"
+        else if (m > 0) printf "%d minute%s\n", m, m == 1 ? "" : "s"
+        else print "less than a minute"
+    }'
 }
 
 is_encrypted() {
@@ -226,6 +246,56 @@ summary() {
             echo "  $_d: no takeout yet"
         fi
     done
+}
+
+# When the attached disk $1 gets its next takeout: on schedule, or when its
+# swap falls due, if that comes first and needs a fresher one.
+next_takeout() {
+    _last=$(last_takeout "$1")
+    _since=$(get attached-since "$NOW")
+    _next=$((_last + TAKEOUT_EVERY_DAYS * DAY))
+    _swap=$((_since + SWAP_AFTER_DAYS * DAY))
+    [ "$_last" -gt 0 ] || _next=$NOW
+    if [ "$_swap" -lt "$_next" ] && [ "$(days_between "$_since" "$_last")" -lt "$SWAP_AFTER_DAYS" ]; then
+        _next=$_swap
+    fi
+    echo "$_next"
+}
+
+# Where things stand with the attached disk $1, to end an email with.
+outlook() {
+    _since=$(get attached-since "$NOW")
+    echo "$1 has been attached since $(fmt_date "$_since"), and has $(kb_to_gb "$(free_kb "$VOLUMES/$1")") free."
+    echo "Next takeout: $(fmt_date "$(next_takeout "$1")")"
+    echo "Swap due:     $(fmt_date $((_since + SWAP_AFTER_DAYS * DAY)))"
+    echo
+    echo "Newest takeouts:"
+    summary
+}
+
+# What the takeout that takeout_to just made holds, and how it went.
+takeout_report() {
+    _files="files"
+    [ "$t_files" -ne 1 ] || _files="file"
+    echo "The takeout, $t_name, holds $(fmt_bytes "$t_bytes") in $t_files $_files."
+    echo "It took $(fmt_duration "$t_secs")."
+    [ "$t_status" -ne 0 ] || return 0
+    echo
+    if [ "$t_failed" -gt 0 ]; then
+        echo "$t_failed item(s) could not be exported, though everything else was."
+        echo "Folders whose manifest.json says \"failures\": true hold the details,"
+    else
+        echo "proton-drive finished, but exited with status $t_status,"
+    fi
+    echo "and the takeout's output is in $t_log."
+}
+
+# Tell a service such as healthchecks.io that proton-firesafe is still
+# running, so that it can say so when the runs stop.
+heartbeat() {
+    [ -n "$HEARTBEAT_URL" ] || return 0
+    curl -fsS -m 10 --retry 2 -o /dev/null "$HEARTBEAT_URL" >/dev/null 2>&1 ||
+        log "heartbeat to $HEARTBEAT_URL failed"
 }
 
 lock() {
@@ -340,8 +410,10 @@ Its output is in $tlog."
         watchdog=$!
     fi
 
+    started=$(date +%s)
     caffeinate -i "$PROTON_DRIVE" takeout run "$@" "$partial" >"$tlog" 2>&1
     status=$?
+    finished=$(date +%s)
 
     if [ -n "$watchdog" ]; then
         rm -f "$running"
@@ -378,18 +450,18 @@ $(tail -n 15 "$LOG")"
     put "last-takeout-$disk" "$NOW"
     forget takeout-failed
 
+    # For takeout_report.
+    t_name=$(basename "$final")
+    t_status=$status
+    t_failed=$(manifest_sum failedItems "$final/manifest.json")
+    t_bytes=$(manifest_sum downloadedBytes "$final/manifest.json")
+    t_files=$(manifest_sum downloadedItems "$final/manifest.json")
+    t_secs=$((finished - started))
+    t_log=$tlog
     if [ "$status" -eq 0 ]; then
-        log "takeout to $disk finished: $(basename "$final")"
+        log "takeout to $disk finished: $t_name"
     else
-        failed=$(failed_items "$final/manifest.json")
-        log "takeout to $disk finished with $failed failed item(s): $(basename "$final")"
-        send_mail "takeout to $disk finished with $failed failed item(s)" \
-"The Proton Drive takeout to $disk has finished, but $failed item(s) could
-not be exported (exit status $status). Everything else was, and the
-takeout has been kept.
-
-Folders whose manifest.json says \"failures\": true hold the details, and
-the takeout's output is in $tlog."
+        log "takeout to $disk finished with $t_failed failed item(s): $t_name"
     fi
 
     while [ "$(count_takeouts "$vol")" -gt "$KEEP_TAKEOUTS" ]; do
@@ -449,24 +521,23 @@ $(summary)"
 
     # Take out on schedule, and once more when the swap falls due, so that
     # the disk goes into the fire safe as fresh as it can be.
+    took_out=no
     last=$(last_takeout "$disk")
     if [ "$(days_between "$last" "$NOW")" -ge "$TAKEOUT_EVERY_DAYS" ] ||
         { [ "$swap_due" = yes ] && [ "$(days_between "$since" "$last")" -lt "$SWAP_AFTER_DAYS" ]; }; then
-        if takeout_to "$disk" && [ "$(get announce)" = "$disk" ]; then
-            put announce ""
-            put remind-status "$NOW" # the announcement counts as a status report
-            send_mail "$disk is in place" \
-"$disk is attached to $HOST, and now holds a fresh takeout.
-The next swap is due on $(fmt_date $((since + SWAP_AFTER_DAYS * DAY))).
-
-Newest takeouts:
-$(summary)"
-        fi
+        takeout_to "$disk" && took_out=yes
         last=$(last_takeout "$disk")
     fi
 
+    # Mail at most once about how things went: the swap request if there
+    # was a swap, else the takeout, else a status report if nothing else
+    # has gone out for a while.
     if [ "$swap_due" = yes ] && [ "$(days_between "$since" "$last")" -ge "$SWAP_AFTER_DAYS" ]; then
         if eject "$disk"; then
+            report=""
+            [ "$took_out" = no ] || report="$(takeout_report)
+
+"
             send_mail "time to swap the backup disks" \
 "$disk holds a takeout from $(fmt_date "$last") and has been ejected,
 so it is safe to unplug.
@@ -474,9 +545,8 @@ so it is safe to unplug.
 Please put $disk in the fire safe, and plug in $(other_disks "$disk")
 in its place.
 
-Newest takeouts:
+${report}Newest takeouts:
 $(summary)"
-            put remind-status "$NOW"
             return 0
         fi
         remind eject-failed "$REMIND_EVERY_DAYS" "could not eject $disk" \
@@ -488,14 +558,29 @@ using it. Eject it by hand with
 then put it in the fire safe, and plug in $(other_disks "$disk")."
     fi
 
-    if [ "$STATUS_EVERY_DAYS" -gt 0 ]; then
-        remind status "$STATUS_EVERY_DAYS" "status: $disk attached" \
-"$disk has been attached to $HOST since $(fmt_date "$since"), and has
-$(kb_to_gb "$(free_kb "$vol")") free. Its takeouts:
-$(list_takeouts "$vol")
+    if [ "$took_out" = yes ]; then
+        intro=""
+        if [ "$(get announce)" = "$disk" ]; then
+            put announce ""
+            subject="$disk is in place"
+            intro="$disk is attached to $HOST, and now holds a fresh takeout.
 
-Newest takeouts:
-$(summary)"
+"
+        else
+            subject="takeout to $disk finished"
+        fi
+        [ "$t_status" -eq 0 ] || subject="takeout to $disk finished with $t_failed failed item(s)"
+        send_mail "$subject" \
+"$intro$(takeout_report)
+
+$(outlook "$disk")"
+    elif [ "$STATUS_EVERY_DAYS" -gt 0 ] &&
+        [ "$(days_between "$(get last-mail 0)" "$NOW")" -ge "$STATUS_EVERY_DAYS" ]; then
+        send_mail "status: $disk attached" \
+"Nothing has needed doing since proton-firesafe last sent mail, so this
+is to say that it is still running.
+
+$(outlook "$disk")"
     fi
     return 0
 }
@@ -507,7 +592,7 @@ cmd_takeout() {
     [ "$(get current)" = "$disk" ] || note_attached "$disk"
     echo "Taking out Proton Drive to $disk, which can take hours."
     takeout_to "$disk" || die "no takeout was made; see $LOG"
-    echo "Done: $VOLUMES/$disk/takeout-$(fmt_stamp "$NOW")"
+    takeout_report
 }
 
 cmd_eject() {
@@ -532,8 +617,8 @@ cmd_status() {
             echo "Encrypted:    NO"
         fi
         echo "Free:         $(kb_to_gb "$(free_kb "$vol")")"
-        if [ "$last" -gt 0 ]; then
-            echo "Next takeout: $(fmt_date $((last + TAKEOUT_EVERY_DAYS * DAY)))"
+        if [ "$last" -gt 0 ] && [ "$(get current)" = "$disk" ]; then
+            echo "Next takeout: $(fmt_date "$(next_takeout "$disk")")"
         else
             echo "Next takeout: on the next run"
         fi
@@ -584,7 +669,11 @@ EOF
 }
 
 case "${1:-run}" in
-run) cmd_run ;;
+run)
+    heartbeat
+    cmd_run
+    heartbeat
+    ;;
 takeout) cmd_takeout ;;
 eject) cmd_eject ;;
 status) cmd_status ;;

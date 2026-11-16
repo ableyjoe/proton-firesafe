@@ -249,10 +249,16 @@ routinely take that long, raise `TAKEOUT_WARN_HOURS` in the config file.
 
 ## Day to day
 
-Mostly, nothing. Every four weeks or so you get an email saying it is time
-to swap the backup disks. The attached disk has already been ejected, so
-unplug it, put it in the fire safe, and plug in the other one. The next
-night's takeout to it is confirmed by email.
+Mostly, reading an email a week. Each takeout is reported when it
+finishes: what it holds, how long it took, and when the next takeout and
+swap are due. If a week goes by with nothing else to say, a status report
+says the same, so mail from proton-firesafe never stops for long while it
+is working. Its silence is the sign that it isn't.
+
+Every four weeks or so you get an email saying it is time to swap the
+backup disks. The attached disk has already been ejected, so unplug it,
+put it in the fire safe, and plug in the other one. The next night's
+takeout to it is confirmed by email.
 
 Other emails mean something needs a look: a takeout that failed (repeated
 daily until one works, usually because `proton-drive` needs logging in
@@ -267,9 +273,18 @@ proton-firesafe takeout    # take out now, whether or not one is due
 proton-firesafe eject      # swap early
 ```
 
-If a swap request is long overdue, proton-firesafe is not running: nobody
-is logged in, or the Mac is off. That is the one failure it cannot email
-you about. For a weekly "all is well" instead, set `STATUS_EVERY_DAYS=7`.
+### Noticing when it stops
+
+Some failures stop proton-firesafe from sending anything: the Mac off,
+nobody logged in, the agent gone. The weekly mail stopping is one sign,
+but only if you notice an absence. For an alert instead, set
+`HEARTBEAT_URL` in the config file to a check's ping URL at a service such
+as [healthchecks.io](https://healthchecks.io). Every run fetches it at its
+start and end, and the service mails you when the fetches stop. The fetch
+carries nothing about your files, though the service sees your IP address
+and when you run. Allow for long takeouts when setting its schedule: a
+period of one day with a grace time of a day suits weekly takeouts that
+take most of a day.
 
 ## Restoring
 
