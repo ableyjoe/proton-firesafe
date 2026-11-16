@@ -279,7 +279,8 @@ Some failures stop proton-firesafe from sending anything: the Mac off,
 nobody logged in, the agent gone. The weekly mail stopping is one sign,
 but only if you notice an absence. For an alert instead, set
 `HEARTBEAT_URL` in the config file to a check's ping URL at a service such
-as [healthchecks.io](https://healthchecks.io). Every run fetches it at its
+as [healthchecks.io](https://healthchecks.io), or on your own OpenBSD
+server with [deadman](https://github.com/ableyjoe/deadman). Every run fetches it at its
 start and end, and the service mails you when the fetches stop. The fetch
 carries nothing about your files, though the service sees your IP address
 and when you run. Allow for long takeouts when setting its schedule: a

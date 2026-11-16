@@ -16,11 +16,12 @@ the disks are the backup if Proton loses the data.
 The author's deployment: a headless 2018 Intel Mac mini, macOS 15, with
 MacPorts; `proton-drive` from the MacPorts port `proton-drive-cli`; msmtp
 through the author's own mail host; two 4 TB WD My Passport disks,
-`Firesafe-A` and `Firesafe-B`; about 500 GB in Proton Drive; a
-healthchecks.io check for the heartbeat. The author uses ksh and doas, not
-bash and sudo, and runs commands on the Mac himself: an agent working on
-this cannot reach it, so give commands to type, one step at a time, and
-ask for their output.
+`Firesafe-A` and `Firesafe-B`; about 500 GB in Proton Drive; for the
+heartbeat, a check on the author's own OpenBSD server, with deadman
+(github.com/ableyjoe/deadman), which replaced healthchecks.io. The author
+uses ksh and doas, not bash and sudo, and runs commands on the Mac
+himself: an agent working on this cannot reach it, so give commands to
+type, one step at a time, and ask for their output.
 
 ## Files
 
@@ -98,8 +99,8 @@ Give every step the same `PREFIX` and other overrides.
   `MAILFROM` defaults to `MAILTO`. Problems use `remind KEY DAYS`, which
   sends at most once per interval.
 - **Heartbeat.** `HEARTBEAT_URL` is fetched with curl at the start and end
-  of every `run`, for a service such as healthchecks.io to alert when runs
-  stop, the one failure no mail can report. Healthchecks ping URLs are
+  of every `run`, for a service such as healthchecks.io or deadman to
+  alert when runs stop, the one failure no mail can report. Healthchecks ping URLs are
   `https://hc-ping.com/<uuid>` or `https://hc-ping.com/<ping-key>/<slug>`;
   a ping key alone is not one.
 - **Watchdog.** launchd starts no new run while one is going, so a hung
