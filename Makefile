@@ -35,6 +35,8 @@ LOG = $(LOGDIR)/proton-firesafe.log
 AGENTDIR = $(HOME)/Library/LaunchAgents
 AGENT = $(AGENTDIR)/$(LABEL).plist
 DOMAIN = gui/$$(id -u)
+SCRIPT_CONF = CONFIG=$(CONFIG) STATEDIR=$(STATEDIR) LOG=$(LOG)
+LAUNCH_CONF = SCRIPT=$(SCRIPT)
 
 all: proton-firesafe.out proton-firesafe-launch
 	@sed -n 's/^#   //p' Makefile
@@ -43,11 +45,11 @@ all: proton-firesafe.out proton-firesafe-launch
 # is rewritten only when they change, so that what depends on it is rebuilt
 # only then: a rebuilt launcher needs Full Disk Access granting again.
 .script.conf: FORCE
-	@echo 'CONFIG=$(CONFIG) STATEDIR=$(STATEDIR) LOG=$(LOG)' >$@.new
+	@echo '$(SCRIPT_CONF)' >$@.new
 	@if cmp -s $@.new $@; then rm $@.new; else mv $@.new $@; fi
 
 .launch.conf: FORCE
-	@echo 'SCRIPT=$(SCRIPT)' >$@.new
+	@echo '$(LAUNCH_CONF)' >$@.new
 	@if cmp -s $@.new $@; then rm $@.new; else mv $@.new $@; fi
 
 .agent.conf: FORCE
@@ -71,7 +73,17 @@ $(LABEL).plist: launchd.plist.in .agent.conf
 	    -e 's|@LOGDIR@|$(LOGDIR)|g' -e 's|@HOUR@|$(HOUR)|g' \
 	    -e 's|@MINUTE@|$(MINUTE)|g' launchd.plist.in >$@
 
-install: proton-firesafe.out proton-firesafe-launch
+# install builds nothing, since what it built as root would belong to root
+# and get in the way of the next make. It checks that make has built both
+# files since their sources last changed, with the same settings.
+install:
+	@if [ ! proton-firesafe.out -nt proton-firesafe ] || \
+	    [ ! proton-firesafe-launch -nt proton-firesafe-launch.c ] || \
+	    [ "$$(cat .script.conf 2>/dev/null)" != '$(SCRIPT_CONF)' ] || \
+	    [ "$$(cat .launch.conf 2>/dev/null)" != '$(LAUNCH_CONF)' ]; then \
+		echo "Run make first, as yourself, with the same PREFIX and other settings."; \
+		exit 1; \
+	fi
 	install -d $(DESTDIR)$(BINDIR) $(DESTDIR)$(LIBEXECDIR) \
 	    $(DESTDIR)$(MANDIR)/man1 $(DESTDIR)$(SYSCONFDIR)
 	install -m 0755 proton-firesafe.out $(DESTDIR)$(SCRIPT)

@@ -43,7 +43,12 @@ doas make install    # as root: /usr/local/{bin,libexec,share/man,etc}, /var/{db
 make agent           # as yourself: ~/Library/LaunchAgents, gui/$UID domain
 ```
 
-Give every step the same `PREFIX` and other overrides.
+Give every step the same `PREFIX` and other overrides. `make install`
+builds nothing, since what it built as root would belong to root and
+block the next `make`: it checks that both built files are newer than
+their sources and that the stamps match its settings, and otherwise
+says to run `make` first. (`make -q` cannot do that check here: the
+stamps depend on `FORCE`, so it always reports work to do.)
 
 ## Design decisions, and why
 

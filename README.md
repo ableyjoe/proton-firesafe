@@ -115,6 +115,10 @@ make
 doas make install
 ```
 
+`make install` builds nothing itself: if `make` has not been run since
+the sources changed, or was run with a different `PREFIX` or other
+setting, it says so and stops.
+
 This installs:
 
 | What | Where |
