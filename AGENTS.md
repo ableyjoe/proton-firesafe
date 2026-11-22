@@ -123,7 +123,8 @@ Give every step the same `PREFIX` and other overrides.
 ## Testing
 
 ```sh
-make test    # runs tests/run-tests.sh under sh, dash and bash --posix
+make test    # runs tests/run-tests.sh under sh, dash and bash --posix,
+             # and with original-awk, as on macOS, if it is installed
 make lint    # shellcheck, the compiler, mandoc, plutil or xmllint
 ```
 
@@ -134,12 +135,22 @@ directory, and `tests/stubs` stands in for `proton-drive`, `caffeinate`,
 mailbox file), `df` and `curl`. They need nothing from macOS. The
 uninstalled script refuses to run unless those variables are set.
 
+`TEST_AWK` runs the script with another awk. macOS's awk is the original
+one, stricter than the gawk or mawk on Linux, and a test run that only
+used those let a syntax error through to the Mac for a week; on Linux,
+install the `original-awk` package and `make test` uses it too.
+
 Every behaviour change gets tests, and a bug fix gets a test that fails
 without the fix: check new tests against the previous version of the
 script (`git show HEAD:proton-firesafe`). Keep README.md and
 proton-firesafe(1) in step with the code in the same commit.
 
 ## What was learnt on the real Mac
+
+- macOS's awk is the original awk, which refuses a bare comparison among
+  `print` or `printf`'s arguments (`printf "%s", n == 1 ? "" : "s"`):
+  bracket it. It made the first takeout reports say "It took ." with
+  nothing in between, since awk printed only an error, to the log.
 
 - `diskutil apfs encryptVolume` takes the volume's identifier (`disk3s1`,
   from `diskutil info /Volumes/NAME`), not the disk's or a mount point,
@@ -163,6 +174,8 @@ proton-firesafe(1) in step with the code in the same commit.
 
 ## Conventions
 
+- No perl. Where a tool is needed, awk, and only what the original awk,
+  macOS's, accepts: nothing gawk-only.
 - British English in documentation, mail and messages; plain words over
   idiom ("There has been nothing to report", not "Nothing has needed
   doing"); no Latin plurals for English words.

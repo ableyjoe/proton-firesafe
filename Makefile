@@ -127,6 +127,11 @@ test:
 			echo "$$out" | tail -n 1; \
 		fi; \
 	done
+	@if command -v original-awk >/dev/null; then \
+		echo "# with original-awk, as on macOS"; \
+		out=$$(TEST_AWK=original-awk sh tests/run-tests.sh) || { echo "$$out"; exit 1; }; \
+		echo "$$out" | tail -n 1; \
+	fi
 
 lint: $(LABEL).plist
 	shellcheck -s sh proton-firesafe tests/run-tests.sh tests/stubs/*

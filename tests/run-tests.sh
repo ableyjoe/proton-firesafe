@@ -7,6 +7,11 @@
 #   sh tests/run-tests.sh
 #   TEST_SHELL=dash sh tests/run-tests.sh
 #   TEST_SHELL="bash --posix" sh tests/run-tests.sh
+#   TEST_AWK=original-awk sh tests/run-tests.sh
+#
+# TEST_AWK runs the script with another awk. macOS's awk is the original
+# one, stricter than gawk or mawk; on Linux it is the original-awk
+# package.
 
 set -u
 
@@ -18,6 +23,11 @@ trap 'rm -rf "$work"' EXIT
 
 export TZ=UTC
 export PROTON_FIRESAFE_PATH="$here/stubs:/usr/bin:/bin:/usr/sbin:/sbin"
+if [ -n "${TEST_AWK:-}" ]; then
+    _awk=$(command -v "$TEST_AWK") || { echo "Bail out! no $TEST_AWK"; exit 1; }
+    mkdir "$work/awk" && ln -s "$_awk" "$work/awk/awk" || exit 1
+    PROTON_FIRESAFE_PATH="$work/awk:$PROTON_FIRESAFE_PATH"
+fi
 export PROTON_FIRESAFE_CONFIG="$work/config"
 export PROTON_FIRESAFE_STATE="$work/state"
 export PROTON_FIRESAFE_LOG="$work/log"

@@ -11,7 +11,7 @@
 
 set -u
 
-VERSION=0.5.0
+VERSION=0.5.1
 
 # ---- defaults; set any of these in the config file ---------------------------
 
@@ -187,11 +187,13 @@ fmt_bytes() {
     }'
 }
 
+# The comparisons are bracketed because macOS's awk, the original one,
+# will not have them bare among printf's arguments.
 fmt_duration() {
     awk -v s="$1" 'BEGIN {
         h = int(s / 3600); m = int((s % 3600) / 60)
-        if (h > 0) printf "%d hour%s %d minute%s\n", h, h == 1 ? "" : "s", m, m == 1 ? "" : "s"
-        else if (m > 0) printf "%d minute%s\n", m, m == 1 ? "" : "s"
+        if (h > 0) printf "%d hour%s %d minute%s\n", h, (h == 1 ? "" : "s"), m, (m == 1 ? "" : "s")
+        else if (m > 0) printf "%d minute%s\n", m, (m == 1 ? "" : "s")
         else print "less than a minute"
     }'
 }

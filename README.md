@@ -311,7 +311,9 @@ make lint    # shellcheck, the compiler, mandoc and plutil
 
 The tests need nothing from macOS: `tests/stubs` stands in for
 `proton-drive`, `caffeinate`, `diskutil`, `msmtp` and `df`, and the
-launcher is built against a stand-in script.
+launcher is built against a stand-in script. They run under several
+shells, and, if the `original-awk` package is installed, with the
+original awk that macOS has, which is stricter than gawk or mawk.
 
 ## Licence
 
