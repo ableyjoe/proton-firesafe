@@ -150,7 +150,8 @@ proton-firesafe(1) in step with the code in the same commit.
 - macOS's awk is the original awk, which refuses a bare comparison among
   `print` or `printf`'s arguments (`printf "%s", n == 1 ? "" : "s"`):
   bracket it. It made the first takeout reports say "It took ." with
-  nothing in between, since awk printed only an error, to the log.
+  nothing in between, since awk printed only an error, which went to
+  `launchd.log` with the rest of standard error.
 
 - `diskutil apfs encryptVolume` takes the volume's identifier (`disk3s1`,
   from `diskutil info /Volumes/NAME`), not the disk's or a mount point,
