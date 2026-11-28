@@ -13,15 +13,22 @@ two encrypted external disks is attached, and sends mail when it is time
 to swap that disk for the one in the fire safe. Proton holds the main copy;
 the disks are the backup if Proton loses the data.
 
+Its home is github.com/strandkip/proton-firesafe. It moved there from
+github.com/ableyjoe/proton-firesafe in November 2026; the old address
+still works.
+
 The author's deployment: a headless 2018 Intel Mac mini, macOS 15, with
 MacPorts; `proton-drive` from the MacPorts port `proton-drive-cli`; msmtp
 through the author's own mail host; two 4 TB WD My Passport disks,
 `Firesafe-A` and `Firesafe-B`; about 500 GB in Proton Drive; for the
 heartbeat, a check on the author's own OpenBSD server, with deadman
-(github.com/ableyjoe/deadman), which replaced healthchecks.io. The author
-uses ksh and doas, not bash and sudo, and runs commands on the Mac
-himself: an agent working on this cannot reach it, so give commands to
-type, one step at a time, and ask for their output.
+(github.com/strandkip/deadman) and a period and grace of a day each,
+which replaced healthchecks.io. The Mac runs 0.5.1, installed on 22
+November 2026. The author uses ksh and doas, not bash and sudo, and
+runs commands on the Mac himself: an agent working on this cannot reach
+it, so give the exact commands to type and ask for their output, one
+thing at a time, since several requests at once leave it unclear which
+earlier steps still matter.
 
 ## Files
 
@@ -180,8 +187,15 @@ proton-firesafe(1) in step with the code in the same commit.
 
 ## Conventions
 
+- Shell, in anything new: two-space indents, no tabs; `do` on its own
+  line under `for`; in `case`, each pattern on its own line with its
+  commands indented below it, `;;` on a line of its own, and a blank line
+  between arms. The script and the tests predate this, with four-space
+  indents.
 - No perl. Where a tool is needed, awk, and only what the original awk,
   macOS's, accepts: nothing gawk-only.
+- In anything written for the author to send as himself, such as
+  release notes, one space after a full stop.
 - British English in documentation, mail and messages; plain words over
   idiom ("There has been nothing to report", not "Nothing has needed
   doing"); no Latin plurals for English words.
