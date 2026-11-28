@@ -185,6 +185,42 @@ proton-firesafe(1) in step with the code in the same commit.
 - The author's PATH puts `~/local/bin` before `/usr/local/bin`; `hash -r`
   does not change the order. Check with `type proton-firesafe`.
 
+## proton-drive, and its MacPorts port
+
+`proton-drive` comes from the author's own MacPorts port,
+`net/proton-drive-cli`, submitted on 24 October 2026, at 0.9.0, as
+macports/macports-ports pull request #35951, and not yet merged at the
+end of November. It builds Proton's release tarball (tag `cli/vV` in
+github.com/ProtonDriveApps/sdk) with Proton's own build script, into one
+standalone binary that identifies itself as `cli-drive-macports`, as
+Proton's README asks of distributions. A patch relaxes `engines.bun`,
+which upstream pins to one exact version. The port also adds a manual
+page, generated from the CLI's command registry by
+`files/generate-man.ts`. The generator went upstream too, as
+ProtonDriveApps/sdk pull request #80, with bug reports in its comments;
+it was still open on 28 November, and 0.9.0 was still the latest CLI.
+
+The reviews on #35951 so far:
+
+- oytech, 26 October: the manual page should be generated upstream, not
+  by 400 lines that MacPorts maintains. The author replied that it had
+  gone upstream, that the port could drop it once Proton took it, and
+  that a static page would drift more than a generated one.
+- reneeotten, later: could the port use the bun PortGroup? It does not
+  fit. `bun 1.0` installs a package from the npm registry and runs it
+  with bun from `${prefix}/lib/bun`; the CLI's `package.json` is private,
+  it depends on sibling packages in Proton's repository through `file:`
+  paths and a patch outside `cli/`, and it is compiled to a standalone
+  binary, so bun is needed only to build it. The author said so on 28
+  November, and offered to take the manual page out of the pull request
+  and add it later.
+
+If that offer is taken, the manual page comes out by removing the
+`post-patch` block, the manual page steps at the end of `build`, the
+`.1` line in `destroot`, `files/generate-man.ts`, and the mention in
+`long_description`. GitHub mails the author when anyone replies; bring
+reviewers' comments back to this file.
+
 ## Conventions
 
 - Shell, in anything new: two-space indents, no tabs; `do` on its own
